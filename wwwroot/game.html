@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Surf Flyer</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0f172a; display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; overflow: hidden; }
+    canvas { display: block; border-radius: 12px; box-shadow: 0 0 40px rgba(0,0,0,0.5); }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+(function() {
+    'use strict';
+
+    const W = 600, H = 400;
+
+    // --- Waves: smooth flowing hills, no bumps within bumps ---
+    const WAVE_AMPLITUDE_BASE = 62;
+    const WAVE_AMPLITUDE_VAR = 18;
+    const WAVE_FREQ = 0.0045;
+    const WATER_TOP = H - 95;
+
+    // --- Velocity system ---
+    const V_START = 18;
+    const V_MIN = 5;
+    const VEL_DISPLAY_MAX = 120;
+    const SLOPE_ACCEL = 3.0;          // base downhill velocity gain per frame * slope
+    const SLOPE_DRAIN = 0.5;          // uphill drain (gentle — waves should feel fun not punishing)
+    const VEL_DRAG = 0.003;           // soft speed cap drag
+
+    // --- Pump mode (HOLD = bonus speed, not required) ---
+    const PUMP_ACCEL_MULT = 1.5;      // downhill gain amplified when pumping
+    const PUMP_DRAIN_MULT = 0.4;      // uphill drain reduced when pumping
+
+    // --- Coast mode (NOT holding = still good, just not as fast) ---
+    const COAST_ACCEL_MULT = 0.75;    // still builds decent speed coasting downhill
+
+    // --- Trough catapult (always active, not just when pumping) ---
+    const CURVATURE_THRESHOLD = 0.001;
+    const CATAPULT_STRENGTH = 22;
+    const CATAPULT_MAX_BOOST = 2.5;
+
+    // --- Crest launch ---
+    const CREST_JUMP_BONUS = 1.2;     // modest crest multiplier
+    const CREST_VEL_BONUS = 0.15;     // slight extra at high speed
+
+    // --- Core physics ---
+    const GRAVITY = 0.30;
+    const WAVE_SNAP_RANGE = 28;
+    const WAVE_PULL_STRENGTH = 0.10;
+
+    // --- Jump (speed-proportional: low speed = small hop, high speed = real air) ---
+    const JUMP_BASE_VY = -2.0;        // small base hop
+    const JUMP_VEL_SCALE = -0.035;    // speed adds height proportionally
+    const JUMP_VEL_RETAIN = 0.97;     // keep nearly all speed through jump
+
+    // --- Air control (HOLD = dive back down, natural arc otherwise) ---
+    const AIR_DIVE_GRAVITY = 0.50;    // hold to pull back down to wave
+    const VEL_AIR_DECAY = 0.03;       // barely lose velocity in air
+
+    // --- Sharks (rare, occasional) ---
+    const SHARK_FIN_WIDTH = 18;
+    const SHARK_SPAWN_MIN = 600;
+    const SHARK_SPAWN_MAX = 1400;
+    const SHARK_FIN_HEIGHT_MIN = 22;
+    const SHARK_FIN_HEIGHT_MAX = 35;
+
+    // --- Clouds + Coins ---
+    const CLOUD_SPAWN_MIN = 130;
+    const CLOUD_SPAWN_MAX = 240;
+    const COIN_SCORE = 3;
+
+    // --- Scroll speed ---
+    const SCROLL_BASE = 1.8;
+    const SCROLL_VEL_SCALE = 0.018;
+
+    // --- Canvas ---
+    const canvas = document.getElementById('game');
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+
+    // --- State ---
+    let state = 'menu';
+    let score = 0;
+    let highScore = parseInt(localStorage.getItem('surfFlyerHigh') || '0');
+    let frameCount = 0;
+
+    let surfer = {
+        x: 100, y: H / 2, vy: 0, rotation: 0,
+        velocity: V_START,
+        velAtLaunch: 0,
+        riding: false,
+        pumping: false,       // true when button held while riding
+    };
+
+    let waveOffset = 0;
+    let waveSeeds = [];
+    for (let i = 0; i < 10; i++) waveSeeds.push(Math.random() * 100);
+
+    let sharks = [];
+    let nextSharkIn = 200;
+    let cloudFormations = [];
+    let nextCloudIn = 80;
+    let coins = [];
+    let coinParticles = [];
+    let particles = [];
+    let splashParticles = [];
+
+    // Status text system
+    let statusText = '';
+    let statusTimer = 0;
+    let statusColor = '#fff';
+    let catapultFlash = 0;
+
+    function setStatus(text, color, duration) {
+        statusText = text;
+        statusColor = color;
+        statusTimer = duration;
+    }
+
+    // --- Input ---
+    let spaceDown = false;
+    let spaceJustPressed = false;
+    let spaceJustReleased = false;
+
+    function onKeyDown(e) {
+        if (e.code === 'Space' || e.code === 'ArrowUp') {
+            e.preventDefault();
+            if (!spaceDown) spaceJustPressed = true;
+            spaceDown = true;
+        }
+    }
+    function onKeyUp(e) {
+        if (e.code === 'Space' || e.code === 'ArrowUp') {
+            e.preventDefault();
+            if (spaceDown) spaceJustReleased = true;
+            spaceDown = false;
+        }
+    }
+    function onTouch(e) {
+        e.preventDefault();
+        if (!spaceDown) spaceJustPressed = true;
+        spaceDown = true;
+    }
+    function onTouchEnd(e) {
+        e.preventDefault();
+        if (spaceDown) spaceJustReleased = true;
+        spaceDown = false;
+    }
+
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
+    canvas.addEventListener('touchstart', onTouch, { passive: false });
+    canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+    canvas.addEventListener('mousedown', onTouch);
+    canvas.addEventListener('mouseup', onTouchEnd);
+
+    // --- Wave: clean up/down hills, no sub-ripples ---
+    function getWaveHeight(x) {
+        const wx = x + waveOffset;
+        let h = 0;
+        // Primary wave — the big hills
+        h += Math.sin(wx * WAVE_FREQ) * WAVE_AMPLITUDE_BASE;
+        // Slow variation — makes some hills taller/shorter
+        h += Math.sin(wx * WAVE_FREQ * 0.37 + waveSeeds[0]) * WAVE_AMPLITUDE_VAR;
+        return WATER_TOP + h;
+    }
+
+    function getWaveSlope(x) {
+        return (getWaveHeight(x + 2) - getWaveHeight(x - 2)) / 4;
+    }
+
+    function getWaveCurvature(x) {
+        return (getWaveHeight(x + 10) - 2 * getWaveHeight(x) + getWaveHeight(x - 10)) / 100;
+    }
+
+    function isOnCrest(x) {
+        return getWaveCurvature(x) > CURVATURE_THRESHOLD;
+    }
+
+    function isInTrough(x) {
+        return getWaveCurvature(x) < -CURVATURE_THRESHOLD;
+    }
+
+    // --- Sharks ---
+    function spawnShark() {
+        sharks.push({
+            x: W + SHARK_FIN_WIDTH + 10,
+            finHeight: SHARK_FIN_HEIGHT_MIN + Math.random() * (SHARK_FIN_HEIGHT_MAX - SHARK_FIN_HEIGHT_MIN),
+            scored: false,
+            wobble: Math.random() * Math.PI * 2,
+        });
+        nextSharkIn = SHARK_SPAWN_MIN + Math.floor(Math.random() * (SHARK_SPAWN_MAX - SHARK_SPAWN_MIN));
+    }
+
+    // --- Clouds + Coins ---
+    function spawnCloudFormation() {
+        const tier = Math.min(2, Math.floor(score / 10));
+        const bands = [
+            { minY: 100, maxY: 180 },
+            { minY: 50, maxY: 130 },
+            { minY: 25, maxY: 80 },
+        ];
+        const bandIdx = Math.floor(Math.random() * (tier + 1));
+        const band = bands[bandIdx];
+        const baseY = band.minY + Math.random() * (band.maxY - band.minY);
+
+        const puffCount = 2 + Math.floor(Math.random() * 3);
+        const puffs = [];
+        let cx = 0;
+        for (let i = 0; i < puffCount; i++) {
+            const r = 14 + Math.random() * 16;
+            puffs.push({ ox: cx, oy: (Math.random() - 0.5) * r * 0.5, r });
+            cx += r * 1.1 + 3 + Math.random() * 8;
+        }
+        const totalWidth = cx + puffs[puffs.length - 1].r;
+
+        const formationCoins = [];
+        for (let i = 0; i < puffCount - 1; i++) {
+            const gapX = (puffs[i].ox + puffs[i].r + puffs[i + 1].ox - puffs[i + 1].r) / 2;
+            if (Math.random() < 0.8) {
+                formationCoins.push({ ox: gapX + puffs[i].r * 0.3, oy: (Math.random() - 0.5) * 10 });
+            }
+        }
+        if (Math.random() < 0.5) {
+            const dir = Math.random() < 0.5 ? -1 : 1;
+            formationCoins.push({ ox: totalWidth * (0.3 + Math.random() * 0.4), oy: dir * (20 + Math.random() * 15) });
+        }
+
+        const formation = {
+            x: W + totalWidth + 20, y: baseY,
+            puffs, totalWidth,
+            speed: 0.3 + Math.random() * 0.2,
+            opacity: 0.25 + Math.random() * 0.2,
+        };
+        cloudFormations.push(formation);
+
+        for (const c of formationCoins) {
+            coins.push({
+                formationIdx: cloudFormations.length - 1,
+                ox: c.ox, oy: c.oy,
+                x: formation.x + c.ox, y: formation.y + c.oy,
+                collected: false, spin: Math.random() * Math.PI * 2,
+            });
+        }
+        nextCloudIn = CLOUD_SPAWN_MIN + Math.floor(Math.random() * (CLOUD_SPAWN_MAX - CLOUD_SPAWN_MIN));
+    }
+
+    // --- Reset ---
+    function resetGame() {
+        surfer = {
+            x: 100, y: WATER_TOP - 15, vy: 0, rotation: 0,
+            velocity: V_START, velAtLaunch: 0,
+            riding: true, pumping: false,
+        };
+        sharks = [];
+        cloudFormations = [];
+        coins = [];
+        coinParticles = [];
+        particles = [];
+        splashParticles = [];
+        score = 0;
+        frameCount = 0;
+        waveOffset = 0;
+        nextSharkIn = 200;
+        nextCloudIn = 60;
+        statusText = '';
+        statusTimer = 0;
+        catapultFlash = 0;
+    }
+
+    // --- Particles ---
+    function addTrailParticle() {
+        particles.push({
+            x: surfer.x - 8, y: surfer.y + 4,
+            vx: -1 - Math.random(), vy: (Math.random() - 0.5) * 0.8,
+            life: 20 + Math.random() * 15, maxLife: 35,
+            r: 2 + Math.random() * 2,
+        });
+    }
+    function addSplash(x, y) {
+        for (let i = 0; i < 8; i++) {
+            splashParticles.push({
+                x, y, vx: (Math.random() - 0.5) * 4, vy: -2 - Math.random() * 4,
+                life: 20 + Math.random() * 10, maxLife: 30, r: 2 + Math.random() * 3,
+            });
+        }
+    }
+    function addCatapultBurst(x, y) {
+        for (let i = 0; i < 12; i++) {
+            splashParticles.push({
+                x: x - 5 + Math.random() * 10, y,
+                vx: (Math.random() - 0.3) * 5,
+                vy: -3 - Math.random() * 6,
+                life: 25 + Math.random() * 15, maxLife: 40,
+                r: 2 + Math.random() * 3,
+            });
+        }
+    }
+    function addLaunchBurst(x, y) {
+        for (let i = 0; i < 16; i++) {
+            splashParticles.push({
+                x, y,
+                vx: (Math.random() - 0.5) * 6,
+                vy: -4 - Math.random() * 8,
+                life: 25 + Math.random() * 15, maxLife: 40,
+                r: 2 + Math.random() * 4,
+            });
+        }
+    }
+    function addCoinBurst(x, y) {
+        for (let i = 0; i < 6; i++) {
+            coinParticles.push({
+                x, y, vx: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 3,
+                life: 20 + Math.random() * 10, maxLife: 30, r: 2 + Math.random() * 2,
+            });
+        }
+    }
+
+    // --- Collision ---
+    function checkCollision() {
+        const sx = surfer.x, sy = surfer.y, sr = 10;
+        const waveY = getWaveHeight(sx);
+        if (sy + sr > waveY) return 'wave';
+        for (const s of sharks) {
+            const swy = getWaveHeight(s.x);
+            const finTop = swy - s.finHeight;
+            if (sx + sr > s.x - SHARK_FIN_WIDTH / 2 && sx - sr < s.x + SHARK_FIN_WIDTH / 2) {
+                const dx = Math.abs(sx - s.x);
+                const taper = 1 - ((sy - finTop) / s.finHeight);
+                const hw = (SHARK_FIN_WIDTH / 2) * Math.max(0.3, Math.min(1, 1 - taper * 0.7));
+                if (dx < hw + sr * 0.6 && sy + sr > finTop) return 'shark';
+            }
+        }
+        return null;
+    }
+
+    function checkCoinCollection() {
+        const sx = surfer.x, sy = surfer.y;
+        for (const c of coins) {
+            if (c.collected) continue;
+            const dx = sx - c.x, dy = sy - c.y;
+            if (dx * dx + dy * dy < 22 * 22) {
+                c.collected = true;
+                score += COIN_SCORE;
+                addCoinBurst(c.x, c.y);
+            }
+        }
+    }
+
+    // --- Update ---
+    function update() {
+        frameCount++;
+        if (statusTimer > 0) statusTimer--;
+        if (catapultFlash > 0) catapultFlash--;
+
+        if (state === 'menu') {
+            waveOffset += SCROLL_BASE * 0.5;
+            for (const f of cloudFormations) f.x -= f.speed;
+            if (spaceJustPressed || spaceJustReleased) { state = 'playing'; resetGame(); }
+            spaceJustPressed = false;
+            spaceJustReleased = false;
+            return;
+        }
+
+        if (state === 'dead') {
+            surfer.vy += GRAVITY * 0.5;
+            surfer.y += surfer.vy;
+            surfer.rotation += 0.15;
+            waveOffset += SCROLL_BASE * 0.3;
+            if (spaceJustPressed || spaceJustReleased) { state = 'playing'; resetGame(); }
+            spaceJustPressed = false;
+            spaceJustReleased = false;
+            return;
+        }
+
+        // --- Playing ---
+        const waveY = getWaveHeight(surfer.x);
+        const distToWave = waveY - surfer.y;
+        const slope = getWaveSlope(surfer.x);
+        const curvature = getWaveCurvature(surfer.x);
+        const onCrest = isOnCrest(surfer.x);
+        const inTrough = isInTrough(surfer.x);
+
+        // Scroll speed scales with velocity
+        const scrollSpeed = SCROLL_BASE + surfer.velocity * SCROLL_VEL_SCALE;
+        waveOffset += scrollSpeed;
+
+        // =============================================
+        //  WAVE RIDING MODE
+        // =============================================
+        if (distToWave < WAVE_SNAP_RANGE && surfer.vy >= -1) {
+            surfer.riding = true;
+
+            // Snap to wave surface
+            const targetY = waveY - 12;
+            surfer.y += (targetY - surfer.y) * 0.3;
+            surfer.vy *= 0.5;
+
+            // --- Slope-based velocity (always active) ---
+            if (slope > 0.03) {
+                // Downhill = speed gain (amplified when pumping)
+                const accelMult = spaceDown ? PUMP_ACCEL_MULT : COAST_ACCEL_MULT;
+                surfer.velocity += slope * SLOPE_ACCEL * accelMult;
+            } else if (slope < -0.03) {
+                // Uphill = gentle drain (reduced when pumping)
+                const drainMult = spaceDown ? PUMP_DRAIN_MULT : 1.0;
+                surfer.velocity -= Math.abs(slope) * SLOPE_DRAIN * drainMult;
+            }
+
+            surfer.pumping = spaceDown;
+
+            // Trough catapult (always active — rewards good positioning)
+            if (inTrough && surfer.velocity > V_MIN + 2 && slope >= -0.01) {
+                const boost = Math.abs(curvature) * surfer.velocity * CATAPULT_STRENGTH;
+                surfer.velocity += Math.min(boost, CATAPULT_MAX_BOOST);
+                if (catapultFlash <= 0) {
+                    setStatus('CATAPULT!', '#4ade80', 35);
+                    catapultFlash = 20;
+                    addCatapultBurst(surfer.x, waveY);
+                }
+            }
+
+            // --- RELEASE = JUMP (from anywhere! crest = bonus) ---
+            if (spaceJustReleased) {
+                const launchVy = JUMP_BASE_VY + JUMP_VEL_SCALE * surfer.velocity;
+                if (onCrest) {
+                    // Crest launch — big bonus!
+                    const velPct = Math.min(1, surfer.velocity / VEL_DISPLAY_MAX);
+                    const crestMult = CREST_JUMP_BONUS + velPct * CREST_VEL_BONUS;
+                    surfer.vy = launchVy * crestMult;
+                    addLaunchBurst(surfer.x, waveY);
+                    setStatus(`CREST x${crestMult.toFixed(1)}!`, '#fbbf24', 50);
+                } else {
+                    // Normal jump — still works, just no multiplier
+                    surfer.vy = launchVy;
+                    addSplash(surfer.x, waveY);
+                }
+                surfer.riding = false;
+                surfer.pumping = false;
+                surfer.velAtLaunch = surfer.velocity;
+                surfer.velocity *= JUMP_VEL_RETAIN;
+            }
+
+            // Standard drag (soft speed cap)
+            surfer.velocity -= surfer.velocity * VEL_DRAG;
+
+            // Slope force tilts surfer with wave
+            surfer.vy += slope * 0.12;
+
+            // Clamp velocity
+            surfer.velocity = Math.max(V_MIN, surfer.velocity);
+        }
+        // =============================================
+        //  AIRBORNE MODE
+        // =============================================
+        else {
+            surfer.riding = false;
+            surfer.pumping = false;
+
+            if (spaceDown) {
+                // DIVE: holding button in air = pull back down to wave
+                surfer.vy += AIR_DIVE_GRAVITY;
+            } else {
+                // NATURAL ARC: normal gravity, ride the arc
+                surfer.vy += GRAVITY;
+            }
+
+            // Gentle wave pull when close
+            if (distToWave > 0 && distToWave < 100) {
+                surfer.vy += WAVE_PULL_STRENGTH * (1 - distToWave / 100) * 0.3;
+            }
+
+            // Velocity decays in air
+            surfer.velocity = Math.max(V_MIN, surfer.velocity - VEL_AIR_DECAY);
+        }
+        spaceJustPressed = false;
+        spaceJustReleased = false;
+
+        surfer.y += surfer.vy;
+
+        // Rotation follows velocity + wave contour
+        const ridingTilt = surfer.riding ? slope * 0.8 : 0;
+        const targetRot = surfer.vy * 0.05 + ridingTilt;
+        surfer.rotation += (targetRot - surfer.rotation) * 0.15;
+
+        // Trail
+        if (frameCount % 2 === 0) addTrailParticle();
+
+        // Spawn sharks (rare)
+        nextSharkIn--;
+        if (nextSharkIn <= 0) spawnShark();
+        for (const s of sharks) {
+            s.x -= scrollSpeed;
+            s.wobble += 0.08;
+            if (!s.scored && s.x + SHARK_FIN_WIDTH / 2 < surfer.x) { s.scored = true; score++; }
+        }
+        sharks = sharks.filter(s => s.x > -SHARK_FIN_WIDTH - 30);
+
+        // Spawn clouds
+        nextCloudIn--;
+        if (nextCloudIn <= 0) spawnCloudFormation();
+        for (const f of cloudFormations) f.x -= scrollSpeed * 0.5 + f.speed;
+        for (const c of coins) {
+            if (c.collected) continue;
+            const f = cloudFormations[c.formationIdx];
+            if (f) { c.x = f.x + c.ox; c.y = f.y + c.oy; }
+            c.spin += 0.06;
+        }
+
+        // Clean formations
+        const oldLen = cloudFormations.length;
+        cloudFormations = cloudFormations.filter(f => f.x + f.totalWidth > -40);
+        if (cloudFormations.length < oldLen) {
+            const removed = oldLen - cloudFormations.length;
+            coins = coins.filter(c => c.formationIdx >= removed);
+            coins.forEach(c => c.formationIdx -= removed);
+        }
+        coins = coins.filter(c => { const f = cloudFormations[c.formationIdx]; return f !== undefined; });
+
+        checkCoinCollection();
+
+        // Particles
+        particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.life--; });
+        particles = particles.filter(p => p.life > 0);
+        splashParticles.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.2; p.life--; });
+        splashParticles = splashParticles.filter(p => p.life > 0);
+        coinParticles.forEach(p => { p.x += p.vx; p.y += p.vy; p.life--; });
+        coinParticles = coinParticles.filter(p => p.life > 0);
+
+        // Collision
+        const hit = checkCollision();
+        if (hit === 'shark') {
+            state = 'dead';
+            if (score > highScore) { highScore = score; localStorage.setItem('surfFlyerHigh', highScore.toString()); }
+        } else if (hit === 'wave') {
+            surfer.y = waveY - 12;
+            surfer.vy = 0;
+            surfer.riding = true;
+            // Landing in a trough gives a velocity boost
+            if (isInTrough(surfer.x) && surfer.velocity > V_MIN) {
+                const landBoost = Math.abs(getWaveCurvature(surfer.x)) * surfer.velocity * CATAPULT_STRENGTH * 0.5;
+                surfer.velocity += Math.min(landBoost, CATAPULT_MAX_BOOST);
+                setStatus('TROUGH LANDING!', '#4ade80', 30);
+            }
+            addSplash(surfer.x, waveY);
+        }
+    }
+
+    // ===================== DRAW =====================
+
+    function drawSky() {
+        const grad = ctx.createLinearGradient(0, 0, 0, H);
+        grad.addColorStop(0, '#1e3a5f');
+        grad.addColorStop(0.5, '#3b82f6');
+        grad.addColorStop(0.8, '#93c5fd');
+        grad.addColorStop(1, '#60a5fa');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+        ctx.beginPath();
+        ctx.arc(W - 80, 60, 30, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(253,224,71,0.8)';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(W - 80, 60, 38, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(253,224,71,0.15)';
+        ctx.fill();
+    }
+
+    function drawWaves() {
+        ctx.fillStyle = '#1e40af';
+        ctx.fillRect(0, WATER_TOP - 85, W, H - WATER_TOP + 85);
+        ctx.beginPath();
+        ctx.moveTo(0, H);
+        for (let x = 0; x <= W; x += 3) ctx.lineTo(x, getWaveHeight(x));
+        ctx.lineTo(W, H);
+        ctx.closePath();
+        const g = ctx.createLinearGradient(0, WATER_TOP - 85, 0, H);
+        g.addColorStop(0, '#2563eb');
+        g.addColorStop(0.3, '#1d4ed8');
+        g.addColorStop(1, '#1e3a8a');
+        ctx.fillStyle = g;
+        ctx.fill();
+
+        // Foam line
+        ctx.beginPath();
+        for (let x = 0; x <= W; x += 3) {
+            const y = getWaveHeight(x);
+            if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // *** WHITE WATER at crest zones (launch zones) ***
+        if (state === 'playing') {
+            for (let x = 0; x <= W; x += 4) {
+                const curv = getWaveCurvature(x);
+                if (curv > CURVATURE_THRESHOLD * 0.7) {
+                    const intensity = Math.min(1, (curv - CURVATURE_THRESHOLD * 0.7) / 0.002);
+                    const wy = getWaveHeight(x);
+                    const shimmer = Math.sin(frameCount * 0.15 + x * 0.3) * 0.15;
+                    // Foam dots
+                    ctx.beginPath();
+                    ctx.arc(x, wy - 1, 3 + intensity * 3, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(255,255,255,${(0.25 + shimmer) * intensity})`;
+                    ctx.fill();
+                    // Extra spray particles near the tip
+                    if (intensity > 0.5 && frameCount % 3 === 0) {
+                        ctx.beginPath();
+                        ctx.arc(x + (Math.random() - 0.5) * 8, wy - 3 - Math.random() * 5, 1.5, 0, Math.PI * 2);
+                        ctx.fillStyle = `rgba(255,255,255,${0.3 * intensity})`;
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        // Velocity foam trail on wave surface
+        const velPct = Math.min(1, surfer.velocity / VEL_DISPLAY_MAX);
+        if (state === 'playing' && velPct > 0.2) {
+            const alpha = (velPct - 0.2) / 0.8 * 0.35;
+            ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
+            ctx.lineWidth = 2 + velPct * 2;
+            ctx.beginPath();
+            for (let i = 0; i < 6; i++) {
+                const sx = surfer.x - 15 - i * 12;
+                const sy = getWaveHeight(sx) - 1;
+                if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+            }
+            ctx.stroke();
+        }
+
+        // Catapult glow effect at trough
+        if (catapultFlash > 0 && state === 'playing') {
+            const alpha = catapultFlash / 20 * 0.25;
+            const wy = getWaveHeight(surfer.x);
+            ctx.beginPath();
+            ctx.arc(surfer.x, wy, 25 + (20 - catapultFlash) * 2, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(74,222,128,${alpha})`;
+            ctx.fill();
+        }
+    }
+
+    function drawShark(s) {
+        const wy = getWaveHeight(s.x);
+        const finTop = wy - s.finHeight;
+        const wb = Math.sin(s.wobble) * 1.5;
+        ctx.save();
+        ctx.translate(s.x, finTop + wb);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(6, s.finHeight * 0.4, SHARK_FIN_WIDTH / 2, s.finHeight);
+        ctx.lineTo(-SHARK_FIN_WIDTH / 2 + 2, s.finHeight);
+        ctx.quadraticCurveTo(-3, s.finHeight * 0.6, 0, 0);
+        ctx.closePath();
+        ctx.fillStyle = '#475569';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(-2, s.finHeight * 0.5, -SHARK_FIN_WIDTH / 2 + 4, s.finHeight);
+        ctx.lineTo(-SHARK_FIN_WIDTH / 2 + 2, s.finHeight);
+        ctx.quadraticCurveTo(-3, s.finHeight * 0.6, 0, 0);
+        ctx.closePath();
+        ctx.fillStyle = '#64748b';
+        ctx.fill();
+        ctx.restore();
+        ctx.beginPath();
+        ctx.ellipse(s.x, wy, SHARK_FIN_WIDTH * 0.6, 3, 0, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,255,255,${0.3 + Math.sin(s.wobble * 2) * 0.1})`;
+        ctx.fill();
+    }
+
+    function drawCloudFormations() {
+        for (const f of cloudFormations) {
+            ctx.globalAlpha = f.opacity;
+            for (const p of f.puffs) {
+                ctx.beginPath();
+                ctx.arc(f.x + p.ox, f.y + p.oy, p.r, 0, Math.PI * 2);
+                ctx.fillStyle = '#fff';
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(f.x + p.ox, f.y + p.oy + p.r * 0.25, p.r * 0.85, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(148,163,184,0.12)';
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    function drawCoins() {
+        for (const c of coins) {
+            if (c.collected) continue;
+            const squeeze = Math.abs(Math.cos(c.spin));
+            const r = 7;
+            ctx.beginPath();
+            ctx.arc(c.x, c.y, r + 4, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(251,191,36,0.15)';
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(c.x, c.y, r * Math.max(0.2, squeeze), r, 0, 0, Math.PI * 2);
+            ctx.fillStyle = '#fbbf24';
+            ctx.fill();
+            ctx.strokeStyle = '#f59e0b';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            if (squeeze > 0.4) {
+                ctx.beginPath();
+                ctx.ellipse(c.x, c.y, (r - 2.5) * squeeze, r - 2.5, 0, 0, Math.PI * 2);
+                ctx.strokeStyle = '#f59e0b';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                ctx.fillStyle = '#f59e0b';
+                ctx.font = `bold ${Math.floor(9 * squeeze)}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('+' + COIN_SCORE, c.x, c.y);
+            }
+        }
+    }
+
+    function drawCoinParticles() {
+        coinParticles.forEach(p => {
+            const a = p.life / p.maxLife;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.r * a, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(251,191,36,${a * 0.8})`;
+            ctx.fill();
+        });
+    }
+
+    function drawSurfer() {
+        ctx.save();
+        ctx.translate(surfer.x, surfer.y);
+        ctx.rotate(surfer.rotation);
+
+        const velPct = Math.min(1, surfer.velocity / VEL_DISPLAY_MAX);
+        const isPumping = surfer.pumping && surfer.riding;
+        const isDiving = !surfer.riding && spaceDown;
+
+        // Speed lines when pumping with high velocity
+        if (isPumping && velPct > 0.3) {
+            const a = (velPct - 0.3) / 0.7 * 0.6;
+            ctx.strokeStyle = `rgba(255,255,255,${a})`;
+            ctx.lineWidth = 1.5;
+            for (let i = 0; i < 3; i++) {
+                const ly = -3 + i * 6;
+                ctx.beginPath();
+                ctx.moveTo(-18 - i * 3, ly);
+                ctx.lineTo(-28 - i * 5 - velPct * 10, ly);
+                ctx.stroke();
+            }
+        }
+
+        // Catapult burst lines
+        if (catapultFlash > 10) {
+            const a = (catapultFlash - 10) / 10 * 0.6;
+            ctx.strokeStyle = `rgba(74,222,128,${a})`;
+            ctx.lineWidth = 2;
+            for (let i = 0; i < 4; i++) {
+                const angle = -Math.PI * 0.8 + i * 0.4;
+                ctx.beginPath();
+                ctx.moveTo(Math.cos(angle) * 15, Math.sin(angle) * 15);
+                ctx.lineTo(Math.cos(angle) * 25, Math.sin(angle) * 25);
+                ctx.stroke();
+            }
+        }
+
+        // Board
+        ctx.beginPath();
+        ctx.ellipse(0, 6, 16, 4, 0, 0, Math.PI * 2);
+        ctx.fillStyle = '#fbbf24';
+        ctx.fill();
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-8, 6);
+        ctx.lineTo(8, 6);
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Body: crouched when pumping, upright otherwise
+        const bodyH = isPumping ? 6 : 8;
+        const bodyY = isPumping ? 0 : -2;
+        const lowVel = !surfer.riding && surfer.velocity < 12;
+        ctx.beginPath();
+        ctx.ellipse(0, bodyY, isPumping ? 6 : 5, bodyH, 0, 0, Math.PI * 2);
+        ctx.fillStyle = isPumping ? '#3b82f6' : (lowVel ? '#fb923c' : '#60a5fa');
+        ctx.fill();
+
+        // Pump glow when actively pumping
+        if (isPumping && velPct > 0.4) {
+            ctx.beginPath();
+            ctx.ellipse(0, bodyY, 8, bodyH + 2, 0, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(59,130,246,${(velPct - 0.4) * 0.3})`;
+            ctx.fill();
+        }
+
+        // Head
+        const headY = isPumping ? -7 : -12;
+        ctx.beginPath();
+        ctx.arc(0, headY, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#fcd34d';
+        ctx.fill();
+
+        // Arms
+        let armUp;
+        if (isDiving) {
+            armUp = 0.4;  // arms tucked for dive
+        } else if (isPumping) {
+            armUp = 0.3;  // arms tucked for pumping
+        } else if (lowVel) {
+            armUp = 0.5;  // arms drooping
+        } else {
+            armUp = 0.2;  // neutral
+        }
+        const armY = isPumping ? -2 : -4;
+        ctx.beginPath();
+        ctx.moveTo(-4, armY);
+        ctx.lineTo(-14, armY + armUp * 10);
+        ctx.moveTo(4, armY);
+        ctx.lineTo(14, armY + armUp * 10);
+        ctx.strokeStyle = '#fcd34d';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.restore();
+    }
+
+    function drawParticles() {
+        particles.forEach(p => {
+            const a = p.life / p.maxLife;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.r * a, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(147,197,253,${a * 0.5})`;
+            ctx.fill();
+        });
+        splashParticles.forEach(p => {
+            const a = p.life / p.maxLife;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.r * a, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255,255,255,${a * 0.7})`;
+            ctx.fill();
+        });
+    }
+
+    // --- HUD ---
+    function drawHUD() {
+        const x = 8, y = H - 32;
+        ctx.save();
+        ctx.globalAlpha = 0.75;
+        ctx.fillStyle = 'rgba(15,23,42,0.6)';
+        ctx.beginPath();
+        ctx.roundRect(x, y, 130, 24, 6);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.font = '9px -apple-system, sans-serif';
+        ctx.textAlign = 'left';
+
+        // Velocity bar
+        const velPct = Math.min(1, surfer.velocity / VEL_DISPLAY_MAX);
+        const velColor = catapultFlash > 0 ? '#4ade80'
+            : surfer.pumping ? '#3b82f6'
+            : (velPct > 0.6 ? '#4ade80' : velPct > 0.25 ? '#fbbf24' : '#f87171');
+        ctx.fillStyle = '#64748b';
+        ctx.fillText('VEL', x + 6, y + 15);
+        drawMiniBar(x + 28, y + 8, 94, 10, velPct, velColor);
+
+        ctx.restore();
+
+        // Mode indicator (bottom right)
+        if (state === 'playing') {
+            ctx.font = 'bold 10px -apple-system, sans-serif';
+            ctx.textAlign = 'right';
+
+            if (statusTimer > 0) {
+                const alpha = Math.min(1, statusTimer / 10);
+                ctx.fillStyle = statusColor;
+                ctx.globalAlpha = alpha;
+                ctx.fillText(statusText, W - 10, H - 20);
+                ctx.globalAlpha = 1;
+            } else if (surfer.riding) {
+                const onCrest = isOnCrest(surfer.x);
+                if (onCrest && spaceDown) {
+                    // On crest while holding = prime launch spot!
+                    const pulse = 0.6 + Math.sin(frameCount * 0.25) * 0.4;
+                    ctx.fillStyle = `rgba(251,191,36,${pulse})`;
+                    ctx.font = 'bold 12px -apple-system, sans-serif';
+                    ctx.fillText('RELEASE!', W - 10, H - 20);
+                } else if (spaceDown) {
+                    ctx.fillStyle = velPct > 0.5 ? '#3b82f6' : '#60a5fa';
+                    ctx.fillText(
+                        velPct > 0.7 ? 'FULL POWER!' : velPct > 0.4 ? 'Pumping!' : 'Pumping...',
+                        W - 10, H - 20
+                    );
+                } else {
+                    ctx.fillStyle = '#93c5fd';
+                    ctx.fillText('Riding', W - 10, H - 20);
+                }
+            } else {
+                if (spaceDown) {
+                    ctx.fillStyle = '#f87171';
+                    ctx.fillText('Diving!', W - 10, H - 20);
+                } else {
+                    ctx.fillStyle = '#93c5fd';
+                    ctx.fillText('Air', W - 10, H - 20);
+                }
+            }
+        }
+    }
+
+    function drawMiniBar(x, y, w, h, pct, color) {
+        pct = Math.max(0, Math.min(1, pct));
+        ctx.fillStyle = 'rgba(255,255,255,0.08)';
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, 3);
+        ctx.fill();
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.roundRect(x, y, w * pct, h, 3);
+        ctx.fill();
+    }
+
+    function drawScore() {
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.font = 'bold 28px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(score, W / 2, 40);
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.font = '12px -apple-system, sans-serif';
+        ctx.fillText(`Best: ${highScore}`, W / 2, 58);
+    }
+
+    function drawMenu() {
+        drawSky();
+        drawCloudFormations();
+        drawWaves();
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 36px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Surf Flyer', W / 2, H / 2 - 65);
+
+        ctx.save();
+        ctx.translate(W / 2, H / 2 - 12);
+        ctx.translate(0, Math.sin(frameCount * 0.05) * 8);
+        drawSurferStatic();
+        ctx.restore();
+
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.font = '15px -apple-system, sans-serif';
+        ctx.fillText('Press SPACE or tap to start', W / 2, H / 2 + 38);
+
+        ctx.fillStyle = 'rgba(255,255,255,0.45)';
+        ctx.font = '11px -apple-system, sans-serif';
+        ctx.fillText('HOLD to pump speed \u2022 RELEASE to jump', W / 2, H / 2 + 60);
+        ctx.fillText('Crests give launch bonus \u2022 Grab coins!', W / 2, H / 2 + 76);
+        ctx.fillText('HOLD in air to dive back down', W / 2, H / 2 + 92);
+        ctx.fillText('Avoid the sharks!', W / 2, H / 2 + 108);
+
+        if (highScore > 0) {
+            ctx.fillStyle = 'rgba(251,191,36,0.8)';
+            ctx.font = 'bold 14px -apple-system, sans-serif';
+            ctx.fillText(`High Score: ${highScore}`, W / 2, H / 2 + 148);
+        }
+    }
+
+    function drawSurferStatic() {
+        ctx.beginPath(); ctx.ellipse(0, 6, 16, 4, 0, 0, Math.PI * 2); ctx.fillStyle = '#fbbf24'; ctx.fill();
+        ctx.beginPath(); ctx.ellipse(0, -2, 5, 8, 0, 0, Math.PI * 2); ctx.fillStyle = '#60a5fa'; ctx.fill();
+        ctx.beginPath(); ctx.arc(0, -12, 5, 0, Math.PI * 2); ctx.fillStyle = '#fcd34d'; ctx.fill();
+    }
+
+    function drawDead() {
+        drawSky();
+        drawCloudFormations();
+        drawCoins();
+        drawWaves();
+        sharks.forEach(s => drawShark(s));
+        drawParticles();
+        drawSurfer();
+
+        ctx.fillStyle = 'rgba(15,23,42,0.5)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#f87171';
+        ctx.font = 'bold 32px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Wipeout!', W / 2, H / 2 - 30);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 48px -apple-system, sans-serif';
+        ctx.fillText(score, W / 2, H / 2 + 20);
+        if (score >= highScore && score > 0) {
+            ctx.fillStyle = '#fbbf24';
+            ctx.font = 'bold 16px -apple-system, sans-serif';
+            ctx.fillText('New High Score!', W / 2, H / 2 + 48);
+        }
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.font = '14px -apple-system, sans-serif';
+        ctx.fillText('Press SPACE or tap to retry', W / 2, H / 2 + 80);
+    }
+
+    function drawPlaying() {
+        drawSky();
+        drawCloudFormations();
+        drawCoins();
+        drawCoinParticles();
+        drawParticles();
+        drawWaves();
+        sharks.forEach(s => drawShark(s));
+        drawSurfer();
+        drawScore();
+        drawHUD();
+    }
+
+    function loop() {
+        update();
+        if (state === 'menu') drawMenu();
+        else if (state === 'dead') drawDead();
+        else drawPlaying();
+        requestAnimationFrame(loop);
+    }
+    loop();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wilmington, NC Weather</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%);
+            min-height: 100vh;
+            color: #e2e8f0;
+            padding: 40px 20px;
+        }
+
+        .container { max-width: 960px; margin: 0 auto; }
+
+        header { text-align: center; margin-bottom: 36px; }
+        header h1 { font-size: 2.4rem; font-weight: 300; letter-spacing: -0.5px; }
+        header .location { color: #60a5fa; font-size: 1rem; margin-top: 4px; }
+        header .sub { color: #64748b; font-size: 0.85rem; margin-top: 2px; }
+
+        .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; flex-wrap: wrap; gap: 10px; }
+        .toolbar .status { font-size: 0.85rem; color: #64748b; }
+        .toolbar .status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22c55e; margin-right: 6px; vertical-align: middle; }
+        .toolbar-btns { display: flex; gap: 8px; }
+
+        .tool-btn {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 10px 20px; background: rgba(59,130,246,0.15);
+            border: 1px solid rgba(59,130,246,0.3); border-radius: 8px;
+            color: #60a5fa; font-size: 0.9rem; cursor: pointer; transition: all 0.2s;
+        }
+        .tool-btn:hover { background: rgba(59,130,246,0.25); border-color: rgba(59,130,246,0.5); }
+        .tool-btn:active { transform: scale(0.97); }
+        .tool-btn.loading .icon { animation: spin 0.6s linear infinite; }
+        .tool-btn.prefs-btn { background: rgba(168,85,247,0.15); border-color: rgba(168,85,247,0.3); color: #c4b5fd; }
+        .tool-btn.prefs-btn:hover { background: rgba(168,85,247,0.25); border-color: rgba(168,85,247,0.5); }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* --- Preferences Panel --- */
+        .prefs-panel {
+            display: none; background: rgba(255,255,255,0.06); border: 1px solid rgba(168,85,247,0.2);
+            border-radius: 16px; padding: 24px; margin-bottom: 28px; backdrop-filter: blur(10px);
+        }
+        .prefs-panel.open { display: block; }
+        .prefs-panel h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 2px; color: #c4b5fd; margin-bottom: 16px; }
+        .prefs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
+        .pref-group label { display: block; font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+        .pref-group select, .pref-group input[type=range] {
+            width: 100%; padding: 8px 12px; background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
+            color: #e2e8f0; font-size: 0.9rem; outline: none;
+        }
+        .pref-group select option { background: #1e293b; }
+        .pref-group input[type=range] { padding: 0; height: 6px; -webkit-appearance: none; appearance: none; border: none; border-radius: 3px; cursor: pointer; }
+        .pref-group input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #c4b5fd; cursor: pointer; }
+        .pref-range-labels { display: flex; justify-content: space-between; font-size: 0.7rem; color: #64748b; margin-top: 4px; }
+        .pref-value { font-size: 0.85rem; color: #e2e8f0; font-weight: 600; margin-top: 4px; }
+
+        /* --- Advisor Card --- */
+        .advisor-card {
+            background: linear-gradient(135deg, rgba(168,85,247,0.1), rgba(59,130,246,0.1));
+            border: 1px solid rgba(168,85,247,0.2); border-radius: 20px;
+            padding: 24px 28px; margin-bottom: 32px; position: relative; overflow: hidden;
+        }
+        .advisor-card::before {
+            content: ''; position: absolute; top: -50%; right: -20%; width: 200px; height: 200px;
+            background: radial-gradient(circle, rgba(168,85,247,0.08), transparent 70%);
+        }
+        .advisor-card h2 {
+            font-size: 0.75rem; text-transform: uppercase; letter-spacing: 2px;
+            color: #c4b5fd; margin-bottom: 14px;
+        }
+        .advisor-rec { font-size: 1.3rem; font-weight: 600; line-height: 1.4; margin-bottom: 16px; }
+        .advisor-details { display: flex; flex-wrap: wrap; gap: 12px; }
+        .advisor-chip {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 6px 14px; background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.08); border-radius: 20px;
+            font-size: 0.8rem; color: #94a3b8;
+        }
+        .advisor-chip .chip-val { color: #e2e8f0; font-weight: 600; }
+        .advisor-verdict { margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.06); }
+        .advisor-verdict .wetsuit { font-size: 0.9rem; }
+        .advisor-verdict .wetsuit-icon { font-size: 1.1rem; margin-right: 4px; }
+
+        /* --- Hero Cards --- */
+        .hero { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 32px; }
+        @media (max-width: 640px) { .hero { grid-template-columns: 1fr; } }
+
+        .hero-card {
+            background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 20px; padding: 28px; backdrop-filter: blur(10px);
+        }
+        .hero-card h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 2px; color: #94a3b8; margin-bottom: 16px; }
+        .hero-temp { font-size: 3.8rem; font-weight: 600; line-height: 1; }
+        .hero-condition { font-size: 1.1rem; color: #94a3b8; margin-top: 8px; }
+        .hero-details { display: flex; gap: 20px; margin-top: 16px; font-size: 0.85rem; color: #64748b; }
+        .hero-details span { display: flex; align-items: center; gap: 4px; }
+
+        .beach-stat { margin-bottom: 14px; }
+        .beach-stat .label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
+        .beach-stat .value { font-size: 1.5rem; font-weight: 600; }
+        .beach-stat .value.small { font-size: 1.1rem; }
+
+        /* --- Quality Gauge --- */
+        .quality-gauge { margin-top: 16px; }
+        .gauge-label-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+        .gauge-label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
+        .gauge-score { font-size: 1.4rem; font-weight: 700; }
+        .gauge-track {
+            width: 100%; height: 10px; border-radius: 5px;
+            background: linear-gradient(90deg, #64748b 0%, #ef4444 15%, #f59e0b 35%, #22c55e 60%, #a855f7 85%, #ec4899 100%);
+            position: relative; overflow: visible;
+        }
+        .gauge-fill-mask { position: absolute; top: 0; right: 0; height: 100%; background: rgba(15,23,42,0.7); border-radius: 0 5px 5px 0; transition: width 0.8s ease; }
+        .gauge-needle { position: absolute; top: -4px; width: 4px; height: 18px; background: #fff; border-radius: 2px; box-shadow: 0 0 8px rgba(255,255,255,0.5); transition: left 0.8s ease; }
+        .gauge-labels { display: flex; justify-content: space-between; font-size: 0.65rem; color: #475569; margin-top: 4px; }
+        .surf-rating-text { font-size: 0.95rem; font-weight: 600; margin-top: 8px; }
+
+        /* --- Section Headers --- */
+        .section-title { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 2px; color: #64748b; margin-bottom: 14px; margin-top: 8px; }
+
+        /* --- Hourly Timeline --- */
+        .timeline-wrapper {
+            background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px; padding: 20px; margin-bottom: 32px;
+            overflow-x: auto; -webkit-overflow-scrolling: touch;
+        }
+        .timeline-scroll { display: flex; gap: 0; min-width: max-content; }
+        .timeline-hour {
+            display: flex; flex-direction: column; align-items: center;
+            min-width: 56px; padding: 8px 4px; position: relative; border-radius: 12px;
+        }
+        .timeline-hour .t-time { font-size: 0.7rem; color: #64748b; margin-bottom: 6px; white-space: nowrap; }
+        .timeline-hour .t-bar-wrap { width: 28px; height: 80px; border-radius: 14px; background: rgba(255,255,255,0.05); position: relative; overflow: hidden; }
+        .timeline-hour .t-bar { position: absolute; bottom: 0; left: 0; right: 0; border-radius: 14px; transition: height 0.4s ease; }
+        .timeline-hour .t-wave { font-size: 0.7rem; font-weight: 600; margin-top: 6px; }
+        .timeline-hour .t-period { font-size: 0.6rem; color: #64748b; }
+        .timeline-hour .t-dir { font-size: 0.6rem; color: #475569; }
+        .timeline-hour.is-now { background: rgba(59,130,246,0.1); }
+        .timeline-hour.is-now .t-time { color: #60a5fa; font-weight: 600; }
+        .timeline-hour.is-best { background: rgba(168,85,247,0.12); border: 1px solid rgba(168,85,247,0.25); }
+        .timeline-hour.is-best .t-time { color: #c4b5fd; }
+        .timeline-hour.is-match { box-shadow: inset 0 -3px 0 #4ade80; }
+        .timeline-divider {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            min-width: 40px; font-size: 0.65rem; color: #475569;
+            border-left: 1px dashed rgba(255,255,255,0.1); padding-left: 8px; margin-left: 4px;
+        }
+
+        /* --- Forecast Grid --- */
+        .forecast-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 32px; }
+        @media (max-width: 640px) { .forecast-grid { grid-template-columns: repeat(3, 1fr); } }
+
+        .card {
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px; padding: 20px 14px; text-align: center;
+            backdrop-filter: blur(10px); transition: transform 0.2s, border-color 0.2s;
+            opacity: 0; transform: translateY(12px);
+        }
+        .card.visible { opacity: 1; transform: translateY(0); transition: opacity 0.4s ease, transform 0.4s ease; }
+        .card:hover { transform: translateY(-4px); border-color: rgba(255,255,255,0.15); }
+        .card .day { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1.5px; color: #94a3b8; margin-bottom: 2px; }
+        .card .date { font-size: 0.8rem; color: #64748b; margin-bottom: 12px; }
+        .card .weather-icon { font-size: 2.2rem; margin-bottom: 10px; line-height: 1; }
+        .card .temps { font-size: 0.95rem; font-weight: 600; }
+        .card .temps .lo { color: #64748b; font-weight: 400; }
+        .card .condition-label { font-size: 0.75rem; color: #94a3b8; margin-top: 6px; padding: 2px 10px; background: rgba(255,255,255,0.05); border-radius: 12px; display: inline-block; }
+
+        .surf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; margin-bottom: 32px; }
+
+        .surf-card {
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px; padding: 16px 12px; text-align: center;
+            backdrop-filter: blur(10px); opacity: 0; transform: translateY(12px);
+            transition: transform 0.2s, border-color 0.2s;
+        }
+        .surf-card.visible { opacity: 1; transform: translateY(0); transition: opacity 0.4s ease, transform 0.4s ease; }
+        .surf-card:hover { transform: translateY(-4px); border-color: rgba(255,255,255,0.15); }
+        .surf-card .day { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1.5px; color: #94a3b8; margin-bottom: 8px; }
+        .surf-card .wave { font-size: 1.4rem; font-weight: 600; }
+        .surf-card .detail { font-size: 0.75rem; color: #64748b; margin-top: 4px; }
+        .surf-card .mini-gauge { width: 100%; height: 4px; border-radius: 2px; margin-top: 10px; background: linear-gradient(90deg, #64748b, #ef4444, #f59e0b, #22c55e, #a855f7, #ec4899); position: relative; }
+        .surf-card .mini-needle { position: absolute; top: -3px; width: 3px; height: 10px; background: #fff; border-radius: 1.5px; box-shadow: 0 0 6px rgba(255,255,255,0.4); }
+        .surf-card .score-label { font-size: 0.7rem; margin-top: 6px; font-weight: 600; }
+
+        .temp-freezing { color: #a5b4fc; } .temp-cold { color: #67e8f9; }
+        .temp-cool { color: #6ee7b7; } .temp-mild { color: #86efac; }
+        .temp-warm { color: #fde047; } .temp-hot { color: #fb923c; }
+        .temp-scorching { color: #f87171; }
+
+        .sc-flat { color: #64748b; } .sc-poor { color: #f87171; }
+        .sc-fair { color: #fbbf24; } .sc-good { color: #4ade80; } .sc-epic { color: #c084fc; }
+
+        .error-msg { text-align: center; color: #f87171; padding: 40px; font-size: 0.95rem; }
+        .loading-msg { text-align: center; color: #64748b; padding: 60px; font-size: 1rem; }
+
+        /* --- Game Modal --- */
+        .game-overlay {
+            display: none; position: fixed; inset: 0; z-index: 1000;
+            background: rgba(0,0,0,0.75); backdrop-filter: blur(8px);
+            align-items: center; justify-content: center;
+        }
+        .game-overlay.open { display: flex; }
+        .game-modal {
+            background: #0f172a; border: 1px solid rgba(59,130,246,0.3);
+            border-radius: 20px; padding: 20px; position: relative;
+            box-shadow: 0 25px 60px rgba(0,0,0,0.5);
+            max-width: 660px; width: 95%;
+        }
+        .game-modal-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 14px;
+        }
+        .game-modal-header h3 {
+            font-size: 1rem; font-weight: 600; color: #e2e8f0;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .game-close {
+            width: 32px; height: 32px; border-radius: 8px;
+            background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
+            color: #94a3b8; font-size: 1.2rem; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s;
+        }
+        .game-close:hover { background: rgba(239,68,68,0.2); color: #f87171; border-color: rgba(239,68,68,0.3); }
+        .game-iframe-wrap {
+            border-radius: 12px; overflow: hidden;
+            background: #000; aspect-ratio: 3/2;
+        }
+        .game-iframe-wrap iframe {
+            width: 100%; height: 100%; border: none; display: block;
+        }
+        .tool-btn.game-btn { background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.3); color: #86efac; }
+        .tool-btn.game-btn:hover { background: rgba(34,197,94,0.25); border-color: rgba(34,197,94,0.5); }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>Weather & Surf</h1>
+        <div class="location">Wilmington, NC &middot; Wrightsville Beach</div>
+        <div class="sub">Live data from Open-Meteo</div>
+    </header>
+
+    <div class="toolbar">
+        <div class="status">
+            <span class="dot"></span>
+            <span id="status-text">Loading...</span>
+        </div>
+        <div class="toolbar-btns">
+            <button class="tool-btn prefs-btn" onclick="togglePrefs()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.32 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+                My Prefs
+            </button>
+            <button class="tool-btn game-btn" onclick="openGame()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                Surf Game
+            </button>
+            <button class="tool-btn" onclick="loadAll()">
+                <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+                    <path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+                </svg>
+                Refresh
+            </button>
+        </div>
+    </div>
+
+    <div class="prefs-panel" id="prefsPanel">
+        <h3>My Surf Preferences</h3>
+        <div class="prefs-grid">
+            <div class="pref-group">
+                <label>Skill Level</label>
+                <select id="prefSkill" onchange="savePrefs(); loadAll()">
+                    <option value="beginner">Beginner</option>
+                    <option value="intermediate">Intermediate</option>
+                    <option value="advanced">Advanced</option>
+                </select>
+            </div>
+            <div class="pref-group">
+                <label>Min Wave Height</label>
+                <input type="range" id="prefMinWave" min="0" max="8" step="0.5" value="1" oninput="updatePrefDisplay(); savePrefs(); loadAll()">
+                <div class="pref-range-labels"><span>0 ft</span><span>8 ft</span></div>
+                <div class="pref-value" id="prefMinWaveVal">1 ft</div>
+            </div>
+            <div class="pref-group">
+                <label>Max Wave Height</label>
+                <input type="range" id="prefMaxWave" min="1" max="12" step="0.5" value="6" oninput="updatePrefDisplay(); savePrefs(); loadAll()">
+                <div class="pref-range-labels"><span>1 ft</span><span>12 ft</span></div>
+                <div class="pref-value" id="prefMaxWaveVal">6 ft</div>
+            </div>
+            <div class="pref-group">
+                <label>Cold Tolerance</label>
+                <select id="prefCold" onchange="savePrefs(); loadAll()">
+                    <option value="cold-averse">Cold Averse (prefer > 65 F)</option>
+                    <option value="moderate" selected>Moderate (fine > 55 F)</option>
+                    <option value="tough">Tough (anything goes)</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div id="content"><div class="loading-msg">Fetching weather data...</div></div>
+</div>
+
+<script>
+const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+const conditionIcons = {
+    'clear': '\u2600\uFE0F', 'partly-cloudy': '\u26C5', 'overcast': '\u2601\uFE0F',
+    'fog': '\uD83C\uDF2B\uFE0F', 'drizzle': '\uD83C\uDF26\uFE0F', 'rain': '\uD83C\uDF27\uFE0F',
+    'freezing-rain': '\uD83E\uDDCA', 'snow': '\u2744\uFE0F',
+    'thunderstorm': '\u26C8\uFE0F', 'unknown': '\uD83C\uDF24\uFE0F'
+};
+
+// --- Preferences ---
+const defaultPrefs = { skill: 'intermediate', minWave: 1, maxWave: 6, cold: 'moderate' };
+
+function loadPrefs() {
+    try { return { ...defaultPrefs, ...JSON.parse(localStorage.getItem('surfPrefs')) }; }
+    catch { return { ...defaultPrefs }; }
+}
+
+function savePrefs() {
+    const p = {
+        skill: document.getElementById('prefSkill').value,
+        minWave: parseFloat(document.getElementById('prefMinWave').value),
+        maxWave: parseFloat(document.getElementById('prefMaxWave').value),
+        cold: document.getElementById('prefCold').value
+    };
+    localStorage.setItem('surfPrefs', JSON.stringify(p));
+}
+
+function restorePrefs() {
+    const p = loadPrefs();
+    document.getElementById('prefSkill').value = p.skill;
+    document.getElementById('prefMinWave').value = p.minWave;
+    document.getElementById('prefMaxWave').value = p.maxWave;
+    document.getElementById('prefCold').value = p.cold;
+    updatePrefDisplay();
+}
+
+function updatePrefDisplay() {
+    document.getElementById('prefMinWaveVal').textContent = document.getElementById('prefMinWave').value + ' ft';
+    document.getElementById('prefMaxWaveVal').textContent = document.getElementById('prefMaxWave').value + ' ft';
+}
+
+function togglePrefs() {
+    document.getElementById('prefsPanel').classList.toggle('open');
+}
+
+// --- Wetsuit Recommendation ---
+function wetsuitRec(seaTempF, coldPref) {
+    // Adjust threshold based on cold tolerance
+    const offset = coldPref === 'tough' ? -8 : coldPref === 'cold-averse' ? 8 : 0;
+    const t = seaTempF - offset;
+    if (t >= 72) return { icon: '\uD83E\uDE72', text: 'Boardshorts / rashguard' };
+    if (t >= 65) return { icon: '\uD83E\uDE72', text: 'Spring suit (2mm)' };
+    if (t >= 58) return { icon: '\uD83E\uDDBF', text: '3/2mm fullsuit' };
+    if (t >= 50) return { icon: '\uD83E\uDDBF', text: '4/3mm fullsuit + boots' };
+    if (t >= 42) return { icon: '\uD83E\uDDBF', text: '5/4mm + boots + gloves + hood' };
+    return { icon: '\u2744\uFE0F', text: '6/5mm + full accessories (brr!)' };
+}
+
+// --- Best Window Finder ---
+function findBestWindow(hourly, prefs) {
+    const now = new Date();
+    const currentHour = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours()).getTime();
+    const future = hourly.filter(h => new Date(h.time).getTime() >= currentHour);
+    if (future.length < 3) return null;
+
+    // Score each hour: quality score + personal fit bonus
+    const scored = future.map(h => {
+        let s = h.qualityScore;
+        const inRange = h.waveHeightFt >= prefs.minWave && h.waveHeightFt <= prefs.maxWave;
+        if (inRange) s += 15;
+        // Skill penalty: beginners penalized for big waves, advanced rewarded
+        if (prefs.skill === 'beginner' && h.waveHeightFt > 3) s -= 20;
+        if (prefs.skill === 'advanced' && h.waveHeightFt >= 3) s += 10;
+        // Dawn bonus (6-9am typically cleanest)
+        const hr = new Date(h.time).getHours();
+        if (hr >= 6 && hr <= 9) s += 5;
+        return { ...h, personalScore: Math.max(0, Math.min(100, s)), inRange };
+    });
+
+    // Find best 3-hour sliding window
+    let bestStart = 0, bestAvg = 0;
+    for (let i = 0; i <= scored.length - 3; i++) {
+        const avg = (scored[i].personalScore + scored[i+1].personalScore + scored[i+2].personalScore) / 3;
+        if (avg > bestAvg) { bestAvg = avg; bestStart = i; }
+    }
+
+    const window = scored.slice(bestStart, bestStart + 3);
+    const bestTimes = new Set(window.map(w => w.time));
+    const matchTimes = new Set(scored.filter(s => s.inRange).map(s => s.time));
+
+    return { window, bestAvg: Math.round(bestAvg), bestTimes, matchTimes, allScored: scored };
+}
+
+// --- Helpers ---
+function getTempClass(f) {
+    if (f <= 32) return 'temp-freezing'; if (f <= 45) return 'temp-cold';
+    if (f <= 55) return 'temp-cool'; if (f <= 68) return 'temp-mild';
+    if (f <= 80) return 'temp-warm'; if (f <= 95) return 'temp-hot';
+    return 'temp-scorching';
+}
+
+function scoreColor(score) {
+    if (score < 10) return '#64748b'; if (score < 25) return '#f87171';
+    if (score < 40) return '#fb923c'; if (score < 55) return '#fbbf24';
+    if (score < 70) return '#4ade80'; if (score < 85) return '#34d399';
+    if (score < 95) return '#a78bfa'; return '#ec4899';
+}
+
+function scoreClass(score) {
+    if (score < 15) return 'sc-flat'; if (score < 40) return 'sc-poor';
+    if (score < 65) return 'sc-fair'; if (score < 85) return 'sc-good';
+    return 'sc-epic';
+}
+
+function fmtDate(str) {
+    const d = new Date(str + 'T00:00:00');
+    return { day: dayNames[d.getDay()], date: monthNames[d.getMonth()] + ' ' + d.getDate() };
+}
+
+function fmtHour(str) {
+    const d = new Date(str);
+    const h = d.getHours();
+    if (h === 0) return '12a'; if (h < 12) return h + 'a';
+    if (h === 12) return '12p'; return (h - 12) + 'p';
+}
+
+function fmtWindowTime(timeStr) {
+    const d = new Date(timeStr);
+    const h = d.getHours();
+    const ampm = h >= 12 ? 'pm' : 'am';
+    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return h12 + ampm;
+}
+
+function buildGauge(score, rating) {
+    return `<div class="quality-gauge">
+        <div class="gauge-label-row">
+            <span class="gauge-label">Surf Quality</span>
+            <span class="gauge-score" style="color:${scoreColor(score)}">${score}<span style="font-size:0.7rem;color:#64748b">/100</span></span>
+        </div>
+        <div class="gauge-track">
+            <div class="gauge-fill-mask" style="width:${100 - score}%"></div>
+            <div class="gauge-needle" style="left:calc(${score}% - 2px)"></div>
+        </div>
+        <div class="gauge-labels"><span>Flat</span><span>Poor</span><span>Fair</span><span>Good</span><span>Epic</span></div>
+        <div class="surf-rating-text" style="color:${scoreColor(score)}">${rating}</div>
+    </div>`;
+}
+
+function buildTimeline(hourly, bestResult) {
+    const now = new Date();
+    const currentHour = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours()).getTime();
+
+    let startIdx = hourly.findIndex(h => new Date(h.time).getTime() >= currentHour);
+    if (startIdx < 0) startIdx = 0;
+    const hours = hourly.slice(startIdx, startIdx + 36);
+    const maxWave = Math.max(...hours.map(h => h.waveHeightFt), 1);
+
+    let html = '<div class="timeline-scroll">';
+    let lastDay = '';
+
+    hours.forEach((h, i) => {
+        const d = new Date(h.time);
+        const dayStr = dayNames[d.getDay()];
+        const isNow = d.getTime() === currentHour;
+        const isBest = bestResult && bestResult.bestTimes.has(h.time);
+        const isMatch = bestResult && bestResult.matchTimes.has(h.time);
+        const barPct = Math.round((h.waveHeightFt / maxWave) * 100);
+        const clr = scoreColor(h.qualityScore);
+
+        if (dayStr !== lastDay && i > 0) {
+            html += `<div class="timeline-divider"><span>${dayStr}</span></div>`;
+        }
+        lastDay = dayStr;
+
+        let classes = 'timeline-hour';
+        if (isNow) classes += ' is-now';
+        if (isBest) classes += ' is-best';
+        if (isMatch && !isBest) classes += ' is-match';
+
+        html += `<div class="${classes}">
+            <span class="t-time">${isNow ? 'Now' : fmtHour(h.time)}</span>
+            <div class="t-bar-wrap">
+                <div class="t-bar" style="height:${Math.max(barPct, 8)}%;background:${clr};"></div>
+            </div>
+            <span class="t-wave" style="color:${clr}">${h.waveHeightFt}'</span>
+            <span class="t-period">${h.wavePeriodS}s</span>
+            <span class="t-dir">${h.swellDirection}</span>
+        </div>`;
+    });
+
+    html += '</div>';
+    return html;
+}
+
+function buildAdvisor(beach, weather, bestResult, prefs) {
+    if (!bestResult || bestResult.window.length === 0) return '';
+
+    const w = bestResult.window;
+    const startTime = fmtWindowTime(w[0].time);
+    const endD = new Date(w[w.length - 1].time);
+    endD.setHours(endD.getHours() + 1);
+    const endTime = fmtWindowTime(endD.toISOString().slice(0, 16));
+
+    const startDate = new Date(w[0].time);
+    const isToday = startDate.toDateString() === new Date().toDateString();
+    const isTomorrow = startDate.toDateString() === new Date(Date.now() + 86400000).toDateString();
+    const dayLabel = isToday ? 'Today' : isTomorrow ? 'Tomorrow' : dayNames[startDate.getDay()];
+
+    const avgWave = (w.reduce((s, h) => s + h.waveHeightFt, 0) / w.length).toFixed(1);
+    const avgPeriod = (w.reduce((s, h) => s + h.wavePeriodS, 0) / w.length).toFixed(1);
+    const primaryDir = w[1].swellDirection;
+
+    const ws = wetsuitRec(beach.seaTempF, prefs.cold);
+
+    const recColor = scoreColor(bestResult.bestAvg);
+
+    return `<div class="advisor-card">
+        <h2>Your Best Window</h2>
+        <div class="advisor-rec" style="color:${recColor}">
+            ${dayLabel} ${startTime} - ${endTime}
+        </div>
+        <div class="advisor-details">
+            <div class="advisor-chip"><span class="chip-val">${avgWave} ft</span> avg height</div>
+            <div class="advisor-chip"><span class="chip-val">${avgPeriod}s</span> period</div>
+            <div class="advisor-chip"><span class="chip-val">${primaryDir}</span> swell</div>
+            <div class="advisor-chip"><span class="chip-val" style="color:${recColor}">${bestResult.bestAvg}</span> /100 personal score</div>
+        </div>
+        <div class="advisor-verdict">
+            <div class="wetsuit"><span class="wetsuit-icon">${ws.icon}</span> ${ws.text} <span style="color:#64748b">(water ${Math.round(beach.seaTempF)}\u00B0F)</span></div>
+        </div>
+    </div>`;
+}
+
+async function loadAll() {
+    const btn = document.querySelector('.tool-btn:not(.prefs-btn)');
+    const content = document.getElementById('content');
+    const status = document.getElementById('status-text');
+    btn.classList.add('loading');
+
+    try {
+        const [weatherRes, beachRes] = await Promise.all([
+            fetch('/api/weather'), fetch('/api/beach')
+        ]);
+        if (!weatherRes.ok || !beachRes.ok) throw new Error('API error');
+        const weather = await weatherRes.json();
+        const beach = await beachRes.json();
+        const prefs = loadPrefs();
+        const bestResult = findBestWindow(beach.hourly, prefs);
+
+        let html = '';
+
+        // --- Advisor ---
+        html += buildAdvisor(beach, weather, bestResult, prefs);
+
+        // --- Hero cards ---
+        html += '<div class="hero">';
+        html += `<div class="hero-card">
+            <h2>Wilmington, NC &mdash; Now</h2>
+            <div style="display:flex;align-items:center;gap:16px;">
+                <span style="font-size:3rem;">${conditionIcons[weather.conditionIcon] || '\uD83C\uDF24\uFE0F'}</span>
+                <div>
+                    <div class="hero-temp ${getTempClass(weather.currentTempF)}">${Math.round(weather.currentTempF)}&deg;</div>
+                    <div class="hero-condition">${weather.condition}</div>
+                </div>
+            </div>
+            <div class="hero-details">
+                <span>\uD83D\uDCA8 ${weather.windMph} mph</span>
+                <span>\uD83D\uDCA7 ${weather.humidityPct}%</span>
+            </div>
+        </div>`;
+
+        html += `<div class="hero-card">
+            <h2>Wrightsville Beach &mdash; Surf</h2>
+            <div class="beach-stat">
+                <div class="label">Waves</div>
+                <div class="value">\uD83C\uDF0A ${beach.waveHeightFt} ft <span style="color:#64748b;font-size:0.85rem;font-weight:400;">@ ${beach.wavePeriodS}s from ${beach.swellDirection}</span></div>
+            </div>
+            <div class="beach-stat">
+                <div class="label">Sea Temp</div>
+                <div class="value small">${Math.round(beach.seaTempF)}&deg;F</div>
+            </div>
+            ${buildGauge(beach.qualityScore, beach.surfRating)}
+        </div>`;
+        html += '</div>';
+
+        // --- Timeline ---
+        html += '<div class="section-title">Surf Timeline &mdash; Next 36 Hours <span style="font-size:0.65rem;color:#a78bfa;letter-spacing:0;">\u2726 purple = best window &nbsp; \u25CF green underline = your wave range</span></div>';
+        html += '<div class="timeline-wrapper">';
+        html += buildTimeline(beach.hourly, bestResult);
+        html += '</div>';
+
+        // --- 5-day weather ---
+        html += '<div class="section-title">5-Day Forecast</div><div class="forecast-grid">';
+        weather.daily.forEach((d, i) => {
+            const f = fmtDate(d.date);
+            html += `<div class="card" style="transition-delay:${i * 60}ms">
+                <div class="day">${f.day}</div><div class="date">${f.date}</div>
+                <div class="weather-icon">${conditionIcons[d.conditionIcon] || '\uD83C\uDF24\uFE0F'}</div>
+                <div class="temps"><span class="${getTempClass(d.highF)}">${Math.round(d.highF)}&deg;</span><span class="lo"> / ${Math.round(d.lowF)}&deg;</span></div>
+                <div class="condition-label">${d.condition}</div>
+            </div>`;
+        });
+        html += '</div>';
+
+        // --- Daily surf ---
+        html += '<div class="section-title">Daily Surf Forecast</div><div class="surf-grid">';
+        beach.daily.forEach((d, i) => {
+            const f = fmtDate(d.date);
+            html += `<div class="surf-card" style="transition-delay:${i * 60}ms">
+                <div class="day">${f.day} <span style="font-weight:400;color:#475569">${f.date}</span></div>
+                <div class="wave">${d.waveHeightFt} ft</div>
+                <div class="detail">${d.wavePeriodS}s &middot; ${d.swellDirection}</div>
+                <div class="mini-gauge"><div class="mini-needle" style="left:calc(${d.qualityScore}% - 1.5px)"></div></div>
+                <div class="score-label ${scoreClass(d.qualityScore)}">${d.surfRating} <span style="opacity:0.6">${d.qualityScore}</span></div>
+            </div>`;
+        });
+        html += '</div>';
+
+        content.innerHTML = html;
+
+        requestAnimationFrame(() => {
+            content.querySelectorAll('.card, .surf-card').forEach((el, i) => {
+                setTimeout(() => el.classList.add('visible'), i * 60);
+            });
+        });
+
+        status.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    } catch (err) {
+        content.innerHTML = `<div class="error-msg">Failed to load weather data: ${err.message}</div>`;
+        status.textContent = 'Error';
+    } finally {
+        btn.classList.remove('loading');
+    }
+}
+
+restorePrefs();
+loadAll();
+
+// --- Game Modal ---
+function openGame() {
+    const overlay = document.getElementById('gameOverlay');
+    const wrap = document.getElementById('gameIframeWrap');
+    // Load iframe fresh each time so game resets
+    wrap.innerHTML = '<iframe src="game.html" title="Surf Flyer Game"></iframe>';
+    overlay.classList.add('open');
+}
+
+function closeGame() {
+    const overlay = document.getElementById('gameOverlay');
+    const wrap = document.getElementById('gameIframeWrap');
+    overlay.classList.remove('open');
+    // Destroy iframe to stop game loop & free resources
+    wrap.innerHTML = '';
+}
+
+// Close on Escape key
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeGame();
+});
+</script>
+
+<div class="game-overlay" id="gameOverlay" onclick="if(event.target===this)closeGame()">
+    <div class="game-modal">
+        <div class="game-modal-header">
+            <h3><span style="font-size:1.3rem;">&#127940;</span> Surf Flyer</h3>
+            <button class="game-close" onclick="closeGame()" title="Close (Esc)">&times;</button>
+        </div>
+        <div class="game-iframe-wrap" id="gameIframeWrap"></div>
+    </div>
+</div>
+</body>
+</html>
