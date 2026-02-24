@@ -237,13 +237,41 @@
         }
         .tool-btn.game-btn { background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.3); color: #86efac; }
         .tool-btn.game-btn:hover { background: rgba(34,197,94,0.25); border-color: rgba(34,197,94,0.5); }
+
+        /* --- Beach Summary Bar --- */
+        .beach-bar {
+            display: flex; gap: 8px; margin-bottom: 28px; flex-wrap: wrap;
+        }
+        .beach-chip {
+            display: flex; align-items: center; gap: 8px;
+            padding: 10px 16px; background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;
+            cursor: pointer; transition: all 0.2s; flex: 1; min-width: 140px;
+        }
+        .beach-chip:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.15); }
+        .beach-chip.active { border-color: rgba(59,130,246,0.5); background: rgba(59,130,246,0.1); }
+        .beach-chip .chip-dot {
+            width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+        }
+        .beach-chip .chip-dot.green { background: #22c55e; }
+        .beach-chip .chip-dot.yellow { background: #eab308; }
+        .beach-chip .chip-dot.red { background: #ef4444; }
+        .beach-chip .chip-info { flex: 1; min-width: 0; }
+        .beach-chip .chip-name { font-size: 0.8rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .beach-chip .chip-stats { font-size: 0.7rem; color: #64748b; }
+        .beach-chip .chip-star {
+            font-size: 1.1rem; cursor: pointer; opacity: 0.3; transition: opacity 0.2s;
+            background: none; border: none; padding: 0; line-height: 1; color: #eab308;
+        }
+        .beach-chip .chip-star:hover { opacity: 0.7; }
+        .beach-chip .chip-star.starred { opacity: 1; }
     </style>
 </head>
 <body>
 <div class="container">
     <header>
-        <h1>Weather & Surf</h1>
-        <div class="location">Wilmington, NC &middot; Wrightsville Beach</div>
+        <h1>CheckMySurf</h1>
+        <div class="location" id="headerLocation">Loading...</div>
         <div class="sub">Live data from Open-Meteo</div>
     </header>
 
@@ -309,6 +337,7 @@
         </div>
     </div>
 
+    <div class="beach-bar" id="beachBar"></div>
     <div id="content"><div class="loading-msg">Fetching weather data...</div></div>
 </div>
 
@@ -548,6 +577,58 @@ function buildAdvisor(beach, weather, bestResult, prefs) {
     </div>`;
 }
 
+// --- Beach selection ---
+let currentSlug = null;
+let allBeaches = [];
+
+function getHomeSpot() {
+    return localStorage.getItem('homeSpot') || 'wrightsville';
+}
+
+function setHomeSpot(slug) {
+    localStorage.setItem('homeSpot', slug);
+    renderBeachBar();
+}
+
+function selectBeach(slug) {
+    currentSlug = slug;
+    renderBeachBar();
+    loadAll();
+}
+
+async function loadBeachBar() {
+    try {
+        const res = await fetch('/api/beaches');
+        if (!res.ok) return;
+        allBeaches = await res.json();
+        if (!currentSlug) currentSlug = getHomeSpot();
+        renderBeachBar();
+    } catch (e) {
+        console.error('Failed to load beach bar', e);
+    }
+}
+
+function renderBeachBar() {
+    const bar = document.getElementById('beachBar');
+    const homeSpot = getHomeSpot();
+    bar.innerHTML = allBeaches.map(b => {
+        const isActive = b.slug === currentSlug;
+        const isHome = b.slug === homeSpot;
+        return `<div class="beach-chip ${isActive ? 'active' : ''}" onclick="selectBeach('${b.slug}')">
+            <div class="chip-dot ${b.ratingColor}"></div>
+            <div class="chip-info">
+                <div class="chip-name">${b.name}</div>
+                <div class="chip-stats">${b.waveHeightFt}ft &middot; ${b.surfRating}</div>
+            </div>
+            <button class="chip-star ${isHome ? 'starred' : ''}"
+                onclick="event.stopPropagation(); setHomeSpot('${b.slug}')"
+                title="${isHome ? 'Home spot' : 'Set as home spot'}">
+                ${isHome ? '\u2605' : '\u2606'}
+            </button>
+        </div>`;
+    }).join('');
+}
+
 async function loadAll() {
     const btn = document.querySelector('.tool-btn:not(.prefs-btn)');
     const content = document.getElementById('content');
@@ -555,14 +636,19 @@ async function loadAll() {
     btn.classList.add('loading');
 
     try {
+        if (!currentSlug) currentSlug = getHomeSpot();
         const [weatherRes, beachRes] = await Promise.all([
-            fetch('/api/weather'), fetch('/api/beach')
+            fetch(`/api/weather/${currentSlug}`), fetch(`/api/beach/${currentSlug}`)
         ]);
         if (!weatherRes.ok || !beachRes.ok) throw new Error('API error');
         const weather = await weatherRes.json();
         const beach = await beachRes.json();
         const prefs = loadPrefs();
         const bestResult = findBestWindow(beach.hourly, prefs);
+
+        const beachInfo = allBeaches.find(b => b.slug === currentSlug);
+        const beachName = beachInfo ? beachInfo.name : currentSlug;
+        document.getElementById('headerLocation').textContent = beachName;
 
         let html = '';
 
@@ -572,7 +658,7 @@ async function loadAll() {
         // --- Hero cards ---
         html += '<div class="hero">';
         html += `<div class="hero-card">
-            <h2>Wilmington, NC &mdash; Now</h2>
+            <h2>${beachInfo?.weatherCity || beachName} &mdash; Now</h2>
             <div style="display:flex;align-items:center;gap:16px;">
                 <span style="font-size:3rem;">${conditionIcons[weather.conditionIcon] || '\uD83C\uDF24\uFE0F'}</span>
                 <div>
@@ -587,7 +673,7 @@ async function loadAll() {
         </div>`;
 
         html += `<div class="hero-card">
-            <h2>Wrightsville Beach &mdash; Surf</h2>
+            <h2>${beachName} &mdash; Surf</h2>
             <div class="beach-stat">
                 <div class="label">Waves</div>
                 <div class="value">\uD83C\uDF0A ${beach.waveHeightFt} ft <span style="color:#64748b;font-size:0.85rem;font-weight:400;">@ ${beach.wavePeriodS}s from ${beach.swellDirection}</span></div>
@@ -651,7 +737,7 @@ async function loadAll() {
 }
 
 restorePrefs();
-loadAll();
+loadBeachBar().then(() => loadAll());
 
 // --- Game Modal ---
 function openGame() {
