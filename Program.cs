@@ -138,16 +138,17 @@ string DirectionFromDegrees(double degrees)
     return (label, score);
 }
 
-async Task FetchWeatherDataAsync()
+async Task FetchBeachDataAsync(BeachConfig beach)
 {
-    using var activity = activitySource.StartActivity("FetchWeatherData");
+    using var activity = activitySource.StartActivity("FetchBeachData");
+    activity?.SetTag("beach.slug", beach.Slug);
     var client = httpClientFactory.CreateClient();
 
     try
     {
-        // Fetch Wilmington weather
+        // Fetch weather for this beach's city
         var weatherUrl = "https://api.open-meteo.com/v1/forecast"
-            + "?latitude=34.2257&longitude=-77.9447"
+            + $"?latitude={beach.WeatherLat}&longitude={beach.WeatherLon}"
             + "&daily=temperature_2m_max,temperature_2m_min,weather_code"
             + "&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m"
             + "&temperature_unit=fahrenheit&wind_speed_unit=mph"
@@ -169,7 +170,7 @@ async Task FetchWeatherDataAsync()
                 dDesc[1]));
         }
 
-        cachedWeather = new WeatherData(
+        var weatherData = new WeatherData(
             Math.Round(weatherRaw.Current.Temperature, 1),
             desc[0],
             desc[1],
@@ -177,17 +178,19 @@ async Task FetchWeatherDataAsync()
             weatherRaw.Current.Humidity,
             dailyForecasts);
 
-        activity?.SetTag("weather.current_temp", cachedWeather.CurrentTempF);
-        activity?.SetTag("weather.condition", cachedWeather.Condition);
+        cachedWeather[beach.Slug] = weatherData;
+
+        activity?.SetTag("weather.current_temp", weatherData.CurrentTempF);
+        activity?.SetTag("weather.condition", weatherData.Condition);
 
         logger.LogInformation(
-            "Wilmington weather fetched: {CurrentTemp}F, {Condition}, Wind {WindSpeed}mph, Humidity {Humidity}%",
-            cachedWeather.CurrentTempF, cachedWeather.Condition,
-            cachedWeather.WindMph, cachedWeather.HumidityPct);
+            "{BeachName} weather fetched: {CurrentTemp}F, {Condition}, Wind {WindSpeed}mph, Humidity {Humidity}%",
+            beach.Name, weatherData.CurrentTempF, weatherData.Condition,
+            weatherData.WindMph, weatherData.HumidityPct);
 
-        // Fetch Wrightsville Beach marine data (including hourly for timeline)
+        // Fetch marine data for this beach
         var marineUrl = "https://marine-api.open-meteo.com/v1/marine"
-            + "?latitude=34.2097&longitude=-77.7956"
+            + $"?latitude={beach.BeachLat}&longitude={beach.BeachLon}"
             + "&current=wave_height,wave_period,wave_direction"
             + "&daily=wave_height_max,wave_period_max,wave_direction_dominant"
             + "&hourly=wave_height,wave_period,wave_direction,sea_surface_temperature"
@@ -233,36 +236,46 @@ async Task FetchWeatherDataAsync()
                 dDir, dQ.Label, dQ.Score));
         }
 
-        cachedBeach = new BeachData(
+        var beachData = new BeachData(
             Math.Round(seaTempF, 1),
             waveHt, Math.Round(marineRaw.Current.WavePeriod, 1),
             swellDir, currentQ.Label, currentQ.Score,
             hourlySurf, dailySurf);
 
-        activity?.SetTag("beach.sea_temp_f", cachedBeach.SeaTempF);
-        activity?.SetTag("beach.wave_height_ft", cachedBeach.WaveHeightFt);
-        activity?.SetTag("beach.surf_rating", cachedBeach.SurfRating);
-        activity?.SetTag("beach.quality_score", cachedBeach.QualityScore);
+        cachedBeach[beach.Slug] = beachData;
+
+        activity?.SetTag("beach.sea_temp_f", beachData.SeaTempF);
+        activity?.SetTag("beach.wave_height_ft", beachData.WaveHeightFt);
+        activity?.SetTag("beach.surf_rating", beachData.SurfRating);
+        activity?.SetTag("beach.quality_score", beachData.QualityScore);
 
         logger.LogInformation(
-            "Wrightsville Beach fetched: Sea {SeaTemp}F, Waves {WaveHeight}ft @ {WavePeriod}s from {SwellDir}, Rating: {SurfRating} ({QualityScore}/100)",
-            cachedBeach.SeaTempF, cachedBeach.WaveHeightFt,
-            cachedBeach.WavePeriodS, cachedBeach.SwellDirection, cachedBeach.SurfRating, cachedBeach.QualityScore);
+            "{BeachName} fetched: Sea {SeaTemp}F, Waves {WaveHeight}ft @ {WavePeriod}s from {SwellDir}, Rating: {SurfRating} ({QualityScore}/100)",
+            beach.Name, beachData.SeaTempF, beachData.WaveHeightFt,
+            beachData.WavePeriodS, beachData.SwellDirection, beachData.SurfRating, beachData.QualityScore);
 
-        lastFetchedAt = DateTime.UtcNow;
         weatherFetchCount.Add(1);
     }
     catch (Exception ex)
     {
         weatherFetchErrors.Add(1);
         activity?.SetTag("error", true);
-        logger.LogError(ex, "Failed to fetch weather data");
+        logger.LogError(ex, "Failed to fetch data for {BeachName}", beach.Name);
     }
 }
 
+async Task FetchAllBeachesAsync()
+{
+    foreach (var beach in beaches)
+    {
+        await FetchBeachDataAsync(beach);
+    }
+    lastFetchedAt = DateTime.UtcNow;
+}
+
 // Initial fetch + periodic refresh every 5 minutes
-await FetchWeatherDataAsync();
-var weatherTimer = new Timer(async _ => await FetchWeatherDataAsync(),
+await FetchAllBeachesAsync();
+var weatherTimer = new Timer(async _ => await FetchAllBeachesAsync(),
     null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
 
 logger.LogInformation("Application started. Weather data refreshes every {IntervalMinutes} minutes", 5);
