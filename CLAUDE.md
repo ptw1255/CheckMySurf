@@ -92,3 +92,36 @@ ASP.NET Core (.NET 10) minimal API serving a weather and surf conditions dashboa
 - **OpenTelemetry** (tracing, metrics, ASP.NET Core + HTTP instrumentation) — v1.15.0
 - **Microsoft.AspNetCore.OpenApi** — v10.0.3
 - **Target framework**: .NET 10
+
+## Memory Protocol
+
+This project uses a file-based memory system at `~/.claude/projects/-Users-parker-VSCode-dotNetWebApp/memory/`. It keeps context fresh across agents and sessions.
+
+### For the Orchestrator (Main Agent)
+
+**Session start:**
+1. `memory/MEMORY.md` is auto-loaded — review it
+2. Read `memory/session-log.md` to check for unfinished work
+3. Read relevant topic files (`codebase.md`, `preferences.md`) if the task needs them
+
+**During work:**
+- When dispatching subagents, include: "Read `memory/codebase.md` before starting. Return any new learnings in a `## Learnings` section at the end of your response."
+- When a subagent returns learnings, evaluate and persist worthy ones to the appropriate topic file
+
+**Session end:**
+1. Write a handoff entry to `memory/session-log.md` (keep max 5 entries, remove oldest)
+2. Update `memory/MEMORY.md` if new important facts were learned
+3. Update topic files if relevant
+
+### For Subagents
+
+- Read memory files at start of task (when told to by orchestrator)
+- Never write to memory files directly
+- Return learnings in a `## Learnings` section at the end of your response
+
+### Memory Hygiene
+
+- `MEMORY.md` must stay under 200 lines
+- Don't duplicate CLAUDE.md content in memory files
+- Delete facts immediately when discovered to be wrong
+- Confidence: `high` = verified multiple times, `medium` = observed once, `low` = inferred
