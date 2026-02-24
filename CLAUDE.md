@@ -10,7 +10,28 @@ dotnet run                      # Run the app (http://localhost:5103)
 dotnet run --launch-profile http # Explicitly use the http profile
 ```
 
-No tests exist in this project yet.
+Tests: `dotnet test DotNetWebApp.Tests/` (see CI Harness section below)
+
+## CI Harness
+
+A pre-push quality gate harness runs before every `git push`:
+
+```bash
+./scripts/ci-harness.sh          # Run manually
+./scripts/install-hooks.sh       # Install as git pre-push hook (one-time)
+git push --no-verify             # Bypass the harness
+dotnet test DotNetWebApp.Tests/ --filter "Category!=Integration"  # Run mocked tests only
+dotnet test DotNetWebApp.Tests/ --filter "Category=Integration"   # Run real API tests
+```
+
+### Quality Gates
+1. **Build** — `dotnet build --no-incremental -warnaserror`
+2. **Format** — `dotnet format --verify-no-changes`
+3. **Test** — xUnit tests with mocked HttpClient (excludes integration tests)
+4. **Code Review** — Claude CLI reviews git diff for bugs, security, conventions
+
+### Agent Feedback Loop
+When `git push` is blocked by the pre-push hook, read `.claude/harness-results.json` for structured failure details. Each gate includes status, duration, and error output. Fix all issues, commit, and retry the push.
 
 ## Project Structure
 
@@ -22,6 +43,14 @@ wwwroot/
 telemetry/                  # Runtime JSONL logs/metrics (gitignored)
 Properties/
   launchSettings.json       # Dev server profile (port 5103)
+DotNetWebApp.Tests/         # xUnit test project
+  ApiTests.cs               # Mocked API endpoint tests
+  IntegrationTests.cs       # Real API integration tests (tagged)
+  CustomWebAppFactory.cs    # WebApplicationFactory with mocked HttpClient
+  Fixtures/                 # Canned Open-Meteo JSON responses
+scripts/
+  ci-harness.sh             # CI/CD quality gate harness
+  install-hooks.sh          # Git hook installer
 ```
 
 ## Architecture
