@@ -6,7 +6,6 @@ namespace DotNetWebApp.Tests;
 public class ApiTests : IClassFixture<CustomWebAppFactory>
 {
     private readonly HttpClient _client;
-    private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     public ApiTests(CustomWebAppFactory factory)
     {

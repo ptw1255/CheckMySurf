@@ -32,10 +32,11 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
 
 public class MockHttpClientFactory : IHttpClientFactory
 {
+    private readonly MockOpenMeteoHandler _handler = new();
+
     public HttpClient CreateClient(string name)
     {
-        var handler = new MockOpenMeteoHandler();
-        return new HttpClient(handler);
+        return new HttpClient(_handler, disposeHandler: false);
     }
 }
 

@@ -1,4 +1,5 @@
 #!/bin/bash
+# Note: -e intentionally omitted so all gates run even when earlier ones fail
 set -uo pipefail
 
 # CI/CD Agentic Harness
@@ -80,7 +81,7 @@ echo ""
 # ─── Gate 3: TEST ───
 echo -e "${BLUE}▶ Gate: test${NC}"
 START_MS=$(python3 -c 'import time; print(int(time.time()*1000))')
-TEST_OUTPUT=$(dotnet test "$REPO_ROOT/DotNetWebApp.Tests/" --filter "Category!=Integration" --no-build -v quiet 2>&1) && TEST_STATUS="pass" || TEST_STATUS="fail"
+TEST_OUTPUT=$(dotnet test "$REPO_ROOT/DotNetWebApp.Tests/" --filter "Category!=Integration" -v quiet 2>&1) && TEST_STATUS="pass" || TEST_STATUS="fail"
 END_MS=$(python3 -c 'import time; print(int(time.time()*1000))')
 TEST_DURATION=$((END_MS - START_MS))
 
@@ -108,20 +109,20 @@ else
     DIFF_FILE=$(mktemp)
     echo "$DIFF" > "$DIFF_FILE"
 
-    REVIEW_PROMPT="You are a code reviewer. Review this git diff for:
-1. Bugs or logic errors
-2. Security vulnerabilities (OWASP top 10)
-3. Violations of project conventions (see CLAUDE.md)
-4. Code quality issues
-
-For each issue found, output a JSON array of objects with keys: file, line, severity (error or warning), message, suggestion.
-If no issues found, output an empty JSON array: []
-Output ONLY the JSON array, no other text.
-
-DIFF:
-$(cat "$DIFF_FILE")"
-
-    REVIEW_OUTPUT=$(unset CLAUDECODE; echo "$REVIEW_PROMPT" | claude -p --output-format text --allowedTools "" 2>&1) && REVIEW_STATUS="pass" || REVIEW_STATUS="fail"
+    REVIEW_OUTPUT=$(unset CLAUDECODE; {
+        printf '%s\n' "You are a code reviewer. Review this git diff for:"
+        printf '%s\n' "1. Bugs or logic errors"
+        printf '%s\n' "2. Security vulnerabilities (OWASP top 10)"
+        printf '%s\n' "3. Violations of project conventions (see CLAUDE.md)"
+        printf '%s\n' "4. Code quality issues"
+        printf '%s\n' ""
+        printf '%s\n' "For each issue found, output a JSON array of objects with keys: file, line, severity (error or warning), message, suggestion."
+        printf '%s\n' "If no issues found, output an empty JSON array: []"
+        printf '%s\n' "Output ONLY the JSON array, no other text."
+        printf '%s\n' ""
+        printf '%s\n' "DIFF:"
+        cat "$DIFF_FILE"
+    } | claude -p --output-format text --allowedTools "" 2>&1) && REVIEW_STATUS="pass" || REVIEW_STATUS="fail"
 
     rm -f "$DIFF_FILE"
 
@@ -150,7 +151,7 @@ echo ""
 
 # ─── Write structured results ───
 json_escape() {
-    python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" <<< "$1"
+    python3 -c "import json,sys; print(json.dumps(sys.stdin.read().rstrip('\n')))" <<< "$1"
 }
 
 BUILD_OUTPUT_ESC=$(json_escape "$BUILD_OUTPUT")
