@@ -17,3 +17,6 @@ telemetry/
 .clubhouse/agents.json
 .clubhouse/settings.local.json
 .clubhouse/plugin-data-local/
+
+# CI harness results (ephemeral)
+.claude/harness-results.json
