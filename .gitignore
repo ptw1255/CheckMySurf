@@ -1,0 +1,19 @@
+# Build output
+bin/
+obj/
+
+# Telemetry runtime data
+telemetry/
+
+# IDE / OS
+.DS_Store
+*.user
+*.suo
+.vs/
+
+# Clubhouse agent manager
+.clubhouse/agents/
+.clubhouse/.local/
+.clubhouse/agents.json
+.clubhouse/settings.local.json
+.clubhouse/plugin-data-local/
