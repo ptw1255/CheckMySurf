@@ -643,6 +643,7 @@ async function loadAll() {
         if (!weatherRes.ok || !beachRes.ok) throw new Error('API error');
         const weather = await weatherRes.json();
         const beach = await beachRes.json();
+        loadBeachBar();
         const prefs = loadPrefs();
         const bestResult = findBestWindow(beach.hourly, prefs);
 
