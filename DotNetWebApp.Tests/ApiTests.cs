@@ -15,14 +15,14 @@ public class ApiTests : IClassFixture<CustomWebAppFactory>
     [Fact]
     public async Task GetWeather_Returns200()
     {
-        var response = await _client.GetAsync("/api/weather");
+        var response = await _client.GetAsync("/api/weather/wrightsville");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]
     public async Task GetWeather_ReturnsValidJson()
     {
-        var response = await _client.GetAsync("/api/weather");
+        var response = await _client.GetAsync("/api/weather/wrightsville");
         var content = await response.Content.ReadAsStringAsync();
         var doc = JsonDocument.Parse(content);
         var root = doc.RootElement;
@@ -38,7 +38,7 @@ public class ApiTests : IClassFixture<CustomWebAppFactory>
     [Fact]
     public async Task GetWeather_ReturnsFahrenheitTemperature()
     {
-        var response = await _client.GetAsync("/api/weather");
+        var response = await _client.GetAsync("/api/weather/wrightsville");
         var content = await response.Content.ReadAsStringAsync();
         var doc = JsonDocument.Parse(content);
         var temp = doc.RootElement.GetProperty("currentTempF").GetDouble();
@@ -50,14 +50,14 @@ public class ApiTests : IClassFixture<CustomWebAppFactory>
     [Fact]
     public async Task GetBeach_Returns200()
     {
-        var response = await _client.GetAsync("/api/beach");
+        var response = await _client.GetAsync("/api/beach/wrightsville");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]
     public async Task GetBeach_ReturnsValidJson()
     {
-        var response = await _client.GetAsync("/api/beach");
+        var response = await _client.GetAsync("/api/beach/wrightsville");
         var content = await response.Content.ReadAsStringAsync();
         var doc = JsonDocument.Parse(content);
         var root = doc.RootElement;
@@ -77,7 +77,7 @@ public class ApiTests : IClassFixture<CustomWebAppFactory>
     [Fact]
     public async Task GetBeach_WaveHeightInFeet()
     {
-        var response = await _client.GetAsync("/api/beach");
+        var response = await _client.GetAsync("/api/beach/wrightsville");
         var content = await response.Content.ReadAsStringAsync();
         var doc = JsonDocument.Parse(content);
         var waveHt = doc.RootElement.GetProperty("waveHeightFt").GetDouble();
@@ -89,7 +89,7 @@ public class ApiTests : IClassFixture<CustomWebAppFactory>
     [Fact]
     public async Task GetBeach_QualityScoreInRange()
     {
-        var response = await _client.GetAsync("/api/beach");
+        var response = await _client.GetAsync("/api/beach/wrightsville");
         var content = await response.Content.ReadAsStringAsync();
         var doc = JsonDocument.Parse(content);
         var score = doc.RootElement.GetProperty("qualityScore").GetInt32();
@@ -104,5 +104,29 @@ public class ApiTests : IClassFixture<CustomWebAppFactory>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var contentType = response.Content.Headers.ContentType?.MediaType;
         Assert.Equal("text/html", contentType);
+    }
+
+    [Fact]
+    public async Task GetBeaches_Returns200WithAllBeaches()
+    {
+        var response = await _client.GetAsync("/api/beaches");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var content = await response.Content.ReadAsStringAsync();
+        var doc = JsonDocument.Parse(content);
+        var root = doc.RootElement;
+
+        Assert.Equal(JsonValueKind.Array, root.ValueKind);
+        Assert.Equal(4, root.GetArrayLength());
+
+        // Verify first beach has expected properties
+        var first = root[0];
+        Assert.True(first.TryGetProperty("slug", out _), "Missing slug");
+        Assert.True(first.TryGetProperty("name", out _), "Missing name");
+        Assert.True(first.TryGetProperty("weatherCity", out _), "Missing weatherCity");
+        Assert.True(first.TryGetProperty("qualityScore", out _), "Missing qualityScore");
+        Assert.True(first.TryGetProperty("surfRating", out _), "Missing surfRating");
+        Assert.True(first.TryGetProperty("waveHeightFt", out _), "Missing waveHeightFt");
+        Assert.True(first.TryGetProperty("ratingColor", out _), "Missing ratingColor");
     }
 }

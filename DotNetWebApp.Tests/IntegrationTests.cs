@@ -17,7 +17,7 @@ public class IntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     [Fact]
     public async Task GetWeather_RealApi_Returns200()
     {
-        var response = await _client.GetAsync("/api/weather");
+        var response = await _client.GetAsync("/api/weather/wrightsville");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var content = await response.Content.ReadAsStringAsync();
@@ -28,7 +28,7 @@ public class IntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     [Fact]
     public async Task GetBeach_RealApi_Returns200()
     {
-        var response = await _client.GetAsync("/api/beach");
+        var response = await _client.GetAsync("/api/beach/wrightsville");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var content = await response.Content.ReadAsStringAsync();

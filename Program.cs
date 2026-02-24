@@ -283,21 +283,42 @@ logger.LogInformation("Application started. Weather data refreshes every {Interv
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-app.MapGet("/api/weather", () =>
+app.MapGet("/api/beaches", () =>
+{
+    var summaries = beaches.Select(b =>
+    {
+        if (!cachedBeach.TryGetValue(b.Slug, out var data))
+            return new BeachSummary(b.Slug, b.Name, b.WeatherCity, 0, "Unknown", 0, "red");
+        var color = data.QualityScore >= 55 ? "green" : data.QualityScore >= 25 ? "yellow" : "red";
+        return new BeachSummary(b.Slug, b.Name, b.WeatherCity, data.QualityScore, data.SurfRating,
+            data.WaveHeightFt, color);
+    }).ToList();
+    return Results.Ok(summaries);
+}).WithName("GetAllBeaches");
+
+app.MapGet("/api/beach/{slug}", (string slug) =>
 {
     forecastRequestCount.Add(1);
-    if (cachedWeather is not null)
+    if (cachedBeach.TryGetValue(slug, out var data))
     {
         var age = (DateTime.UtcNow - lastFetchedAt).TotalSeconds;
         forecastCacheAge.Record(age);
+        return Results.Ok(data);
     }
-    return cachedWeather;
-}).WithName("GetWilmingtonWeather");
+    return Results.NotFound(new { error = $"Beach '{slug}' not found" });
+}).WithName("GetBeachBySlug");
 
-app.MapGet("/api/beach", () =>
+app.MapGet("/api/weather/{slug}", (string slug) =>
 {
-    return cachedBeach;
-}).WithName("GetWrightsvilleBeach");
+    forecastRequestCount.Add(1);
+    if (cachedWeather.TryGetValue(slug, out var data))
+    {
+        var age = (DateTime.UtcNow - lastFetchedAt).TotalSeconds;
+        forecastCacheAge.Record(age);
+        return Results.Ok(data);
+    }
+    return Results.NotFound(new { error = $"Beach '{slug}' not found" });
+}).WithName("GetWeatherBySlug");
 
 app.Run();
 
@@ -360,6 +381,9 @@ record HourlySurf(string Time, double WaveHeightFt, double WavePeriodS,
 
 record DailySurf(string Date, double WaveHeightFt, double WavePeriodS,
     string SwellDirection, string SurfRating, int QualityScore);
+
+record BeachSummary(string Slug, string Name, string WeatherCity, int QualityScore,
+    string SurfRating, double WaveHeightFt, string RatingColor);
 
 record BeachConfig(string Slug, string Name, double BeachLat, double BeachLon,
     string WeatherCity, double WeatherLat, double WeatherLon);
