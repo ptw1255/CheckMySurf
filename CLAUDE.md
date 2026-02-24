@@ -33,6 +33,27 @@ dotnet test DotNetWebApp.Tests/ --filter "Category=Integration"   # Run real API
 ### Before Pushing
 Always use `git push` (never `--no-verify`). The pre-push hook runs the CI harness automatically. If the push is blocked, read `.claude/harness-results.json`, fix all reported issues, commit the fixes, and retry `git push`. Repeat until all gates pass.
 
+## Git Workflow
+
+**All changes to `main` must go through Pull Requests.** Never commit or push directly to `main`.
+
+### Branch & PR Process
+1. Create a feature branch from `main`: `git checkout -b <branch-name>`
+2. Make commits on the feature branch
+3. Push the branch: `git push -u origin <branch-name>`
+4. Create a PR: `gh pr create --base main`
+5. Merge via GitHub after review/checks pass
+
+### Branch Naming
+Use descriptive kebab-case names: `feat/add-tide-data`, `fix/wave-height-conversion`, `docs/update-readme`
+
+### Rules
+- **Never push directly to `main`** — branch protection enforces this
+- **Never force-push to `main`**
+- Always create a new branch for each piece of work
+- Keep PRs focused — one feature or fix per PR
+- Run `./scripts/ci-harness.sh` locally before opening a PR
+
 ## Project Structure
 
 ```
