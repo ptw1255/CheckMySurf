@@ -447,3 +447,5 @@ public class FileMetricExporter : BaseExporter<Metric>
         return ExportResult.Success;
     }
 }
+
+public partial class Program { }
