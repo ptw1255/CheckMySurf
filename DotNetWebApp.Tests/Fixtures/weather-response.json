@@ -1,0 +1,14 @@
+{
+  "current": {
+    "temperature_2m": 72.5,
+    "weather_code": 1,
+    "wind_speed_10m": 8.3,
+    "relative_humidity_2m": 65
+  },
+  "daily": {
+    "time": ["2026-02-24", "2026-02-25", "2026-02-26", "2026-02-27", "2026-02-28"],
+    "temperature_2m_max": [75.0, 73.2, 70.1, 68.5, 71.3],
+    "temperature_2m_min": [58.0, 56.5, 54.2, 52.0, 55.8],
+    "weather_code": [1, 2, 3, 61, 0]
+  }
+}
