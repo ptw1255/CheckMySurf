@@ -74,8 +74,17 @@ var forecastCacheAge = meter.CreateHistogram<double>(
 
 // --- Cached weather data ---
 var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-WilmingtonWeatherData? cachedWeather = null;
-WrightsvilleBeachData? cachedBeach = null;
+
+var beaches = new BeachConfig[]
+{
+    new("wrightsville", "Wrightsville Beach", 34.2097, -77.7956, "Wilmington", 34.2257, -77.9447),
+    new("carolina", "Carolina Beach", 34.0353, -77.8936, "Carolina Beach", 34.0353, -77.8864),
+    new("kure", "Kure Beach", 33.9968, -77.9072, "Kure Beach", 33.9968, -77.9072),
+    new("surf-city", "Surf City", 34.4271, -77.5461, "Surf City", 34.4235, -77.5393),
+};
+
+var cachedWeather = new Dictionary<string, WeatherData>();
+var cachedBeach = new Dictionary<string, BeachData>();
 var lastFetchedAt = DateTime.MinValue;
 
 // WMO weather code to description + icon mapping
@@ -160,7 +169,7 @@ async Task FetchWeatherDataAsync()
                 dDesc[1]));
         }
 
-        cachedWeather = new WilmingtonWeatherData(
+        cachedWeather = new WeatherData(
             Math.Round(weatherRaw.Current.Temperature, 1),
             desc[0],
             desc[1],
@@ -224,7 +233,7 @@ async Task FetchWeatherDataAsync()
                 dDir, dQ.Label, dQ.Score));
         }
 
-        cachedBeach = new WrightsvilleBeachData(
+        cachedBeach = new BeachData(
             Math.Round(seaTempF, 1),
             waveHt, Math.Round(marineRaw.Current.WavePeriod, 1),
             swellDir, currentQ.Label, currentQ.Score,
@@ -322,13 +331,13 @@ record OpenMeteoMarineHourly(
 
 // --- App response models ---
 
-record WilmingtonWeatherData(
+record WeatherData(
     double CurrentTempF, string Condition, string ConditionIcon,
     double WindMph, int HumidityPct, List<DailyForecast> Daily);
 
 record DailyForecast(string Date, double HighF, double LowF, string Condition, string ConditionIcon);
 
-record WrightsvilleBeachData(
+record BeachData(
     double SeaTempF, double WaveHeightFt, double WavePeriodS,
     string SwellDirection, string SurfRating, int QualityScore,
     List<HourlySurf> Hourly, List<DailySurf> Daily);
@@ -338,6 +347,9 @@ record HourlySurf(string Time, double WaveHeightFt, double WavePeriodS,
 
 record DailySurf(string Date, double WaveHeightFt, double WavePeriodS,
     string SwellDirection, string SurfRating, int QualityScore);
+
+record BeachConfig(string Slug, string Name, double BeachLat, double BeachLon,
+    string WeatherCity, double WeatherLat, double WeatherLon);
 
 // --- File-based telemetry exporters ---
 
