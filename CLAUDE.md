@@ -55,23 +55,25 @@ scripts/
 
 ## Architecture
 
-ASP.NET Core (.NET 10) minimal API serving a weather and surf conditions dashboard for Wilmington, NC and Wrightsville Beach.
+ASP.NET Core (.NET 10) minimal API serving a weather and surf conditions dashboard for multiple NC beaches.
 
 ### Backend (Program.cs)
 
 - **Single-file architecture** — all backend code lives in `Program.cs`: endpoints, data fetching, caching, telemetry, helper functions, and record types.
-- **Minimal API** with two JSON endpoints:
-  - `GET /api/weather` — Wilmington weather (current + 5-day forecast)
-  - `GET /api/beach` — Wrightsville Beach surf/marine data (current + hourly timeline + 3-day forecast)
+- **Beach registry** — a `BeachConfig` array defines each supported beach (slug, name, lat/lon for marine + weather). Currently 4 NC beaches: Wrightsville, Carolina, Kure, Surf City.
+- **Minimal API** with three JSON endpoints:
+  - `GET /api/beaches` — summary list of all beaches with quality score, rating, wave height, and color indicator
+  - `GET /api/beach/{slug}` — full surf/marine data for one beach (current + hourly timeline + 3-day forecast)
+  - `GET /api/weather/{slug}` — weather data for one beach (current + 5-day forecast)
 - **Data source**: Open-Meteo public APIs (weather + marine). No API key required.
-- **Caching**: In-memory only (no database). Data is fetched on startup and refreshed every 5 minutes via `Timer`.
+- **Caching**: In-memory `Dictionary<string, T>` keyed by beach slug (no database). Data for all beaches is fetched on startup and refreshed every 5 minutes via `Timer`.
 - **Telemetry**: OpenTelemetry tracing + custom metrics, plus file-based exporters writing JSONL to `telemetry/logs.jsonl` and `telemetry/metrics.jsonl`. Custom `FileLoggerProvider`, `FileLogger`, and `FileMetricExporter` classes at the bottom of Program.cs.
-- **Record types**: API deserialization models (`OpenMeteo*` records) and app response models (`WilmingtonWeatherData`, `WrightsvilleBeachData`, etc.) at the bottom of Program.cs.
+- **Record types**: `BeachConfig` for beach definitions, API deserialization models (`OpenMeteo*` records), and app response models (`WeatherData`, `BeachData`, `BeachSummary`, etc.) at the bottom of Program.cs.
 - **Helper functions**: WMO weather codes, wind direction, and surf quality scoring defined as local functions.
 
 ### Frontend (wwwroot/)
 
-- `index.html` — Single-page dashboard with all HTML, CSS, and JS inline. Fetches `/api/weather` and `/api/beach`, renders current conditions, surf quality gauge, hourly surf timeline, 5-day forecast, and daily surf forecast. User preferences (skill level, wave range, cold tolerance) stored in localStorage.
+- `index.html` — Single-page dashboard with all HTML, CSS, and JS inline. Features a **beach summary bar** showing all beaches as chips with red/yellow/green quality indicators. Clicking a chip switches the dashboard to that beach (via slug-based routing). A **star icon** lets users set a "home spot" (saved in localStorage) which loads by default. The header dynamically shows the selected beach name. Fetches `/api/beaches`, `/api/weather/{slug}`, and `/api/beach/{slug}` to render current conditions, surf quality gauge, hourly surf timeline, 5-day forecast, and daily surf forecast. User preferences (skill level, wave range, cold tolerance) also stored in localStorage.
 - `game.html` — Canvas-based "Surf Flyer" mini-game, loaded in an iframe modal from the dashboard.
 - Static files served via `UseStaticFiles()` with `UseDefaultFiles()` (so `/` serves `index.html`).
 
