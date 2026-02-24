@@ -7,6 +7,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="DotNetWebApp.Tests/**" />
+    <Content Remove="DotNetWebApp.Tests/**" />
+    <EmbeddedResource Remove="DotNetWebApp.Tests/**" />
+    <None Remove="DotNetWebApp.Tests/**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
     <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.0" />
