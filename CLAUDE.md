@@ -30,8 +30,8 @@ dotnet test DotNetWebApp.Tests/ --filter "Category=Integration"   # Run real API
 3. **Test** — xUnit tests with mocked HttpClient (excludes integration tests)
 4. **Code Review** — Claude CLI reviews git diff for bugs, security, conventions
 
-### Agent Feedback Loop
-When `git push` is blocked by the pre-push hook, read `.claude/harness-results.json` for structured failure details. Each gate includes status, duration, and error output. Fix all issues, commit, and retry the push.
+### Before Pushing
+Always use `git push` (never `--no-verify`). The pre-push hook runs the CI harness automatically. If the push is blocked, read `.claude/harness-results.json`, fix all reported issues, commit the fixes, and retry `git push`. Repeat until all gates pass.
 
 ## Project Structure
 
